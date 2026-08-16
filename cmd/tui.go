@@ -12,6 +12,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/lipgloss/table"
+	"github.com/guptarohit/asciigraph"
 	"github.com/spf13/cobra"
 )
 
@@ -568,7 +569,21 @@ func loadTUICorrelation() (tuiCorrelation, error) {
 	return c, nil
 }
 
-// rLine renders a correlation value colored/labeled by strength.
+func rValueStr(r float64) string {
+	return fmt.Sprintf("r=%5.2f", r)
+}
+
+func rStyle(r float64) lipgloss.Style {
+	abs := math.Abs(r)
+	switch {
+	case abs > 0.6:
+		return focusHighStyle.Padding(0, 1)
+	case abs >= 0.3:
+		return focusMidStyle.Padding(0, 1)
+	default:
+		return dimStyle.Padding(0, 1)
+	}
+}
 func rLine(r float64) string {
 	abs := math.Abs(r)
 	style := dimStyle
@@ -610,10 +625,7 @@ func loadWeeklyTrend(weekStart string) (tuiWeeklyTrend, error) {
 			sleepRows.Close()
 			return t, err
 		}
-		d := rawDate
-		if pt, perr := time.Parse(time.RFC3339, rawDate); perr == nil {
-			d = pt.Format("2006-01-02")
-		}
+		d := normalizeDate(rawDate)
 		if i, ok := idx[d]; ok {
 			t.sleepHours[i] = hours
 			t.sleepHas[i] = true
@@ -641,34 +653,51 @@ func loadWeeklyTrend(weekStart string) (tuiWeeklyTrend, error) {
 		if err := focusRows.Scan(&date, &avg); err != nil {
 			return t, err
 		}
-		if i, ok := idx[date]; ok {
+		if i, ok := idx[normalizeDate(date)]; ok {
 			t.focusAvg[i] = avg
 			t.focusHas[i] = true
 		}
 	}
 	return t, focusRows.Err()
 }
+func normalizeDate(raw string) string {
+	if pt, err := time.Parse(time.RFC3339, raw); err == nil {
+		return pt.Format("2006-01-02")
+	}
+	if len(raw) >= 10 {
+		return raw[:10]
+	}
+	return raw
+}
 
 var sparkChars = []rune{'▁', '▂', '▃', '▄', '▅', '▆', '▇', '█'}
 
 // sparkline renders one glyph per day; days with no data show '·'.
-func sparkline(values []float64, has []bool, max float64) string {
-	var sb strings.Builder
+func toPlotSeries(values [7]float64, has [7]bool) []float64 {
+	out := make([]float64, 7)
 	for i, v := range values {
-		if !has[i] {
-			sb.WriteRune('·')
-			continue
+		if has[i] {
+			out[i] = v
+		} else {
+			out[i] = math.NaN()
 		}
-		level := int(v / max * float64(len(sparkChars)-1))
-		if level < 0 {
-			level = 0
-		}
-		if level >= len(sparkChars) {
-			level = len(sparkChars) - 1
-		}
-		sb.WriteRune(sparkChars[level])
 	}
-	return sb.String()
+	return out
+}
+
+func weekDayAxis(graph string) string {
+	firstLine := graph
+	if i := strings.IndexByte(graph, '\n'); i >= 0 {
+		firstLine = graph[:i]
+	}
+	margin := strings.IndexRune(firstLine, '┤')
+	if margin < 0 {
+		margin = 0
+	} else {
+		margin++ // include the axis glyph itself
+	}
+	days := []string{"M", "T", "W", "T", "F", "S", "S"}
+	return strings.Repeat(" ", margin) + strings.Join(days, "   ")
 }
 
 // weekGoalStats returns done/total goal counts for a week.
@@ -1856,7 +1885,7 @@ func (m tuiModel) viewBlocks() string {
 					return rowSelectedStyle.Align(lipgloss.Right)
 				}
 				if blk.focus != nil {
-					return focusStyle(*blk.focus)
+					return focusStyle(*blk.focus).Align(lipgloss.Right)
 				}
 				return tableCellStyle.Align(lipgloss.Right)
 			default:
@@ -2052,9 +2081,28 @@ func (m tuiModel) viewMetrics() string {
 
 	b.WriteString(headerStyle.Render("=== Weekly trend ==="))
 	b.WriteString("\n")
-	b.WriteString(fmt.Sprintf("       %s\n", "MTWTFSS"))
-	b.WriteString(fmt.Sprintf("Sleep  %s\n", sparkline(m.weeklyTrend.sleepHours[:], m.weeklyTrend.sleepHas[:], 12)))
-	b.WriteString(fmt.Sprintf("Focus  %s\n", sparkline(m.weeklyTrend.focusAvg[:], m.weeklyTrend.focusHas[:], 10)))
+	sleepGraph := asciigraph.Plot(
+		toPlotSeries(m.weeklyTrend.sleepHours, m.weeklyTrend.sleepHas),
+		asciigraph.Height(4),
+		asciigraph.Width(20),
+		asciigraph.Caption("Sleep (hrs)"),
+	)
+	b.WriteString(sleepGraph)
+	b.WriteString("\n")
+	b.WriteString(dimStyle.Render(weekDayAxis(sleepGraph)))
+	b.WriteString("\n\n")
+
+	focusGraph := asciigraph.Plot(
+		toPlotSeries(m.weeklyTrend.focusAvg, m.weeklyTrend.focusHas),
+		asciigraph.Height(4),
+		asciigraph.Width(20),
+		asciigraph.Caption("Focus (avg)"),
+	)
+	b.WriteString(focusGraph)
+	b.WriteString("\n")
+	b.WriteString(dimStyle.Render(weekDayAxis(focusGraph)))
+	b.WriteString("\n")
+
 	b.WriteString("\n")
 
 	b.WriteString(headerStyle.Render("=== Blocks by project (this week) ==="))
@@ -2075,9 +2123,27 @@ func (m tuiModel) viewMetrics() string {
 		b.WriteString(dimStyle.Render(fmt.Sprintf("Only %d paired days found. Need at least 3 (ideally 14+).\n", m.correlation.pairedDays)))
 	} else {
 		c := m.correlation
-		b.WriteString(fmt.Sprintf("sleep_hours   <-> focus  %s\n", rLine(c.rHours)))
-		b.WriteString(fmt.Sprintf("sleep_quality <-> focus  %s\n", rLine(c.rQuality)))
-		b.WriteString(fmt.Sprintf("feel          <-> focus  %s\n", rLine(c.rFeel)))
+		rows := []struct {
+			label string
+			r     float64
+		}{
+			{"sleep_hours", c.rHours},
+			{"sleep_quality", c.rQuality},
+			{"feel", c.rFeel},
+		}
+		ct := table.New().
+			Border(lipgloss.HiddenBorder()).
+			StyleFunc(func(row, col int) lipgloss.Style {
+				if col == 2 {
+					return rStyle(rows[row].r)
+				}
+				return tableCellStyle
+			})
+		for _, row := range rows {
+			ct.Row(row.label, "<-> focus", rValueStr(row.r), scaledBar(math.Abs(row.r), 1.0, 10))
+		}
+		b.WriteString(ct.Render())
+		b.WriteString("\n")
 	}
 	b.WriteString("\n")
 	b.WriteString(headerStyle.Render("=== Focus by block position (all-time) ==="))
@@ -2093,7 +2159,6 @@ func (m tuiModel) viewMetrics() string {
 		b.WriteString(fmt.Sprintf("Worst weekday: %-4s avg %.1f\n", m.weekdayWorst.day, m.weekdayWorst.avg))
 	}
 
-	b.WriteString("\n")
 	b.WriteString(headerStyle.Render("=== Focus by start time (all-time) ==="))
 	b.WriteString("\n")
 	anyStartTime := false
