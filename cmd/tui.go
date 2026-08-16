@@ -1036,7 +1036,7 @@ func (m tuiModel) View() string {
 	case "add_sleep":
 		b.WriteString(m.viewAddSleepForm())
 	case "block_detail":
-		return "esc/enter/q: back to list"
+		b.WriteString(m.viewBlockDetail())
 	case "new_goal":
 		b.WriteString(m.viewGoalAddForm())
 	default:
@@ -1074,6 +1074,8 @@ func (m tuiModel) helpLine() string {
 		return "↑↓/jk: move  •  enter: pick project  •  esc: cancel"
 	case "new_project":
 		return "type name  •  enter: save  •  esc: cancel"
+	case "block_detail":
+		return "esc/enter/q: back to list"
 	}
 	switch m.tab {
 	case tabBlocks:
