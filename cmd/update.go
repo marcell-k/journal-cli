@@ -5,7 +5,6 @@ import (
 	"database/sql"
 	"fmt"
 	"os"
-	"strings"
 
 	"github.com/spf13/cobra"
 )
@@ -28,15 +27,10 @@ var updateCmd = &cobra.Command{
 		}
 
 		reader := bufio.NewReader(os.Stdin)
-		ask := func(prompt string) string {
-			fmt.Print(prompt + " (leave blank to skip): ")
-			text, _ := reader.ReadString('\n')
-			return strings.TrimSpace(text)
-		}
 
-		doneNotes := ask("Done notes")
-		deliverable := ask("Deliverable/checkpoint")
-		filesLinks := ask("Files/links")
+		doneNotes := askOptional(reader, "Done notes")
+		deliverable := askOptional(reader, "Deliverable/checkpoint")
+		filesLinks := askOptional(reader, "Files/links")
 
 		if doneNotes == "" && deliverable == "" && filesLinks == "" {
 			fmt.Println("Nothing entered, no changes made.")

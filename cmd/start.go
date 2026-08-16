@@ -4,7 +4,6 @@ import (
 	"bufio"
 	"fmt"
 	"os"
-	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -15,20 +14,15 @@ var startCmd = &cobra.Command{
 	Short: "Start a new block",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		reader := bufio.NewReader(os.Stdin)
-		ask := func(prompt string) string {
-			fmt.Print(prompt + ": ")
-			text, _ := reader.ReadString('\n')
-			return strings.TrimSpace(text)
-		}
 
 		projectID, err := selectProject(reader)
 		if err != nil {
 			return err
 		}
 
-		outcome := ask("Outcome")
-		contextReload := ask("Context reload")
-		firstAction := ask("First action")
+		outcome := askRequired(reader, "Outcome")
+		contextReload := askRequired(reader, "Context reload")
+		firstAction := askRequired(reader, "First action")
 
 		today := time.Now().Format("2006-01-02")
 

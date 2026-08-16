@@ -69,15 +69,7 @@ var goalDoneCmd = &cobra.Command{
 			return fmt.Errorf("goal number must be a positive integer, got %q", args[0])
 		}
 
-		weekStart := mondayOf(time.Now()).Format("2006-01-02")
-		var id int
-		err = conn.QueryRow(
-			`SELECT id FROM weekly_goals WHERE week_start = ? ORDER BY id LIMIT 1 OFFSET ?`,
-			weekStart, n-1,
-		).Scan(&id)
-		if err == sql.ErrNoRows {
-			return fmt.Errorf("no goal #%d this week — run 'journal goal list'", n)
-		}
+		id, err := goalIDForNumber(n)
 		if err != nil {
 			return err
 		}
@@ -89,6 +81,73 @@ var goalDoneCmd = &cobra.Command{
 		fmt.Printf("Goal #%d marked done.\n", n)
 		return nil
 	},
+}
+
+var goalEditCmd = &cobra.Command{
+	Use:   "edit <n> <new goal text>",
+	Short: "Edit goal #n's text (number from 'journal goal list', not the DB id)",
+	Args:  cobra.MinimumNArgs(2),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		n, err := strconv.Atoi(args[0])
+		if err != nil || n < 1 {
+			return fmt.Errorf("goal number must be a positive integer, got %q", args[0])
+		}
+		newText := strings.Join(args[1:], " ")
+
+		id, err := goalIDForNumber(n)
+		if err != nil {
+			return err
+		}
+
+		_, err = conn.Exec(`UPDATE weekly_goals SET goal = ? WHERE id = ?`, newText, id)
+		if err != nil {
+			return err
+		}
+		fmt.Printf("Goal #%d updated.\n", n)
+		return nil
+	},
+}
+
+var goalDeleteCmd = &cobra.Command{
+	Use:   "delete <n>",
+	Short: "Delete goal #n (number from 'journal goal list', not the DB id)",
+	Args:  cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		n, err := strconv.Atoi(args[0])
+		if err != nil || n < 1 {
+			return fmt.Errorf("goal number must be a positive integer, got %q", args[0])
+		}
+
+		id, err := goalIDForNumber(n)
+		if err != nil {
+			return err
+		}
+
+		_, err = conn.Exec(`DELETE FROM weekly_goals WHERE id = ?`, id)
+		if err != nil {
+			return err
+		}
+		fmt.Printf("Goal #%d deleted.\n", n)
+		return nil
+	},
+}
+
+// goalIDForNumber resolves a 'journal goal list' display number (1-based, in
+// list order) to the underlying DB id, for the current week.
+func goalIDForNumber(n int) (int, error) {
+	weekStart := mondayOf(time.Now()).Format("2006-01-02")
+	var id int
+	err := conn.QueryRow(
+		`SELECT id FROM weekly_goals WHERE week_start = ? ORDER BY id LIMIT 1 OFFSET ?`,
+		weekStart, n-1,
+	).Scan(&id)
+	if err == sql.ErrNoRows {
+		return 0, fmt.Errorf("no goal #%d this week — run 'journal goal list'", n)
+	}
+	if err != nil {
+		return 0, err
+	}
+	return id, nil
 }
 
 // printWeekGoals is shared by 'goal list' and 'week' so numbering always matches.
@@ -122,6 +181,6 @@ func printWeekGoals(conn *sql.DB) error {
 
 func init() {
 	goalAddCmd.Flags().StringVarP(&goalDay, "day", "d", "", "day override (mon/tue/wed/thu/fri/sat/sun), defaults to today")
-	goalCmd.AddCommand(goalAddCmd, goalDoneCmd, goalListCmd)
+	goalCmd.AddCommand(goalAddCmd, goalDoneCmd, goalEditCmd, goalDeleteCmd, goalListCmd)
 	rootCmd.AddCommand(goalCmd)
 }

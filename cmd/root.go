@@ -57,3 +57,21 @@ func askInt(reader *bufio.Reader, prompt string, min, max int) int {
 		return val
 	}
 }
+
+func askRequired(reader *bufio.Reader, prompt string) string {
+	for {
+		fmt.Print(prompt + ": ")
+		text, _ := reader.ReadString('\n')
+		text = strings.TrimSpace(text)
+		if text != "" {
+			return text
+		}
+		fmt.Println("This can't be blank, try again.")
+	}
+}
+
+func askOptional(reader *bufio.Reader, prompt string) string {
+	fmt.Print(prompt + " (leave blank to skip): ")
+	text, _ := reader.ReadString('\n')
+	return strings.TrimSpace(text)
+}

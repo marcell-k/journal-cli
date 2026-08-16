@@ -5,7 +5,6 @@ import (
 	"database/sql"
 	"fmt"
 	"os"
-	"strings"
 
 	"github.com/spf13/cobra"
 )
@@ -28,18 +27,13 @@ var closeCmd = &cobra.Command{
 		}
 
 		reader := bufio.NewReader(os.Stdin)
-		ask := func(prompt string) string {
-			fmt.Print(prompt + ": ")
-			text, _ := reader.ReadString('\n')
-			return strings.TrimSpace(text)
-		}
 
-		done := ask("Done")
-		notDone := ask("Not done")
-		nextStep := ask("Exact next step to start with")
-		filesLinks := ask("Files/links (leave blank to skip)")
-		focus := askInt(reader, "Focus quality", 1, 5)
-		tweak := ask("One tweak for next block")
+		done := askRequired(reader, "Done")
+		notDone := askRequired(reader, "Not done")
+		nextStep := askRequired(reader, "Exact next step to start with")
+		filesLinks := askOptional(reader, "Files/links")
+		focus := askInt(reader, "Focus quality", 1, 10)
+		tweak := askOptional(reader, "One tweak for next block")
 
 		_, err = conn.Exec(
 			`UPDATE blocks

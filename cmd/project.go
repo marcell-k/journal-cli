@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"bufio"
+	"database/sql"
 	"fmt"
 	"slices"
 	"strconv"
@@ -10,8 +11,6 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// selectProject prints the project list and asks the user to pick by number.
-// Returns the chosen project's id.
 func selectProject(reader *bufio.Reader) (int, error) {
 	rows, err := conn.Query(`SELECT id, name FROM projects ORDER BY id`)
 	if err != nil {
@@ -99,8 +98,65 @@ var projectListCmd = &cobra.Command{
 	},
 }
 
+var projectRenameCmd = &cobra.Command{
+	Use:   "rename <old name> <new name>",
+	Short: "Rename a project",
+	Args:  cobra.ExactArgs(2),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		oldName, newName := args[0], args[1]
+
+		var id int
+		err := conn.QueryRow(`SELECT id FROM projects WHERE name = ?`, oldName).Scan(&id)
+		if err == sql.ErrNoRows {
+			return fmt.Errorf("no project named %q", oldName)
+		}
+		if err != nil {
+			return err
+		}
+
+		_, err = conn.Exec(`UPDATE projects SET name = ? WHERE id = ?`, newName, id)
+		if err != nil {
+			return fmt.Errorf("rename failed (name %q may already exist): %w", newName, err)
+		}
+		fmt.Printf("Renamed project %q to %q.\n", oldName, newName)
+		return nil
+	},
+}
+
+var projectDeleteCmd = &cobra.Command{
+	Use:   "delete <name>",
+	Short: "Delete a project (only if no blocks reference it)",
+	Args:  cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		name := args[0]
+
+		var id int
+		err := conn.QueryRow(`SELECT id FROM projects WHERE name = ?`, name).Scan(&id)
+		if err == sql.ErrNoRows {
+			return fmt.Errorf("no project named %q", name)
+		}
+		if err != nil {
+			return err
+		}
+
+		var count int
+		if err := conn.QueryRow(`SELECT COUNT(*) FROM blocks WHERE project_id = ?`, id).Scan(&count); err != nil {
+			return err
+		}
+		if count > 0 {
+			return fmt.Errorf("project %q has %d block(s) logged against it — rename it instead, or reassign those blocks first", name, count)
+		}
+
+		_, err = conn.Exec(`DELETE FROM projects WHERE id = ?`, id)
+		if err != nil {
+			return err
+		}
+		fmt.Printf("Deleted project %q.\n", name)
+		return nil
+	},
+}
+
 func init() {
-	projectCmd.AddCommand(projectAddCmd)
-	projectCmd.AddCommand(projectListCmd)
+	projectCmd.AddCommand(projectAddCmd, projectListCmd, projectRenameCmd, projectDeleteCmd)
 	rootCmd.AddCommand(projectCmd)
 }
