@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"database/sql"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/spf13/cobra"
@@ -26,15 +27,15 @@ var tabNames = [tabCount]string{"Blocks", "Goals", "Sleep", "Metrics"}
 // ---------- styles ----------
 
 var (
-	activeTabStyle   = lipgloss.NewStyle().Padding(0, 2).Bold(true).Foreground(lipgloss.Color("212")).Underline(true)
-	inactiveTabStyle = lipgloss.NewStyle().Padding(0, 2).Foreground(lipgloss.Color("245"))
-	headerStyle      = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("205"))
-	bannerStyle      = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("214")).
+	activeTabStyle   = lipgloss.NewStyle().Padding(0, 2).Bold(true).Foreground(lipgloss.Color("#e6c384")).Underline(true)
+	inactiveTabStyle = lipgloss.NewStyle().Padding(0, 2).Foreground(lipgloss.Color("#a6a69c"))
+	headerStyle      = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#e6c384"))
+	bannerStyle      = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#7fb4ca")).
 				Border(lipgloss.RoundedBorder()).Padding(0, 1).MarginTop(1).MarginBottom(1)
-	cursorStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("212"))
-	dimStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("241"))
-	errStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("196"))
-	okStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("42"))
+	cursorStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#e6c384"))
+	dimStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("#a6a69c"))
+	errStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("#e46876"))
+	okStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("#87a987"))
 )
 
 // ---------- data rows ----------
@@ -95,6 +96,50 @@ type startFormState struct {
 	errMsg      string
 }
 
+// ---------- new-project form ----------
+
+type newProjectFormState struct {
+	name   string
+	errMsg string
+}
+
+// ---------- add-sleep form ----------
+
+var addSleepFieldLabels = []string{"Day (blank=today)", "Hours", "Quality (1-10)", "Feel (1-10)"}
+
+type addSleepFormState struct {
+	fields [4]string
+	field  int
+	errMsg string
+}
+
+// ---------- block detail ----------
+
+type tuiBlockDetail struct {
+	id, blockNum int
+	date, day    string
+
+	project, outcome, contextReload, firstAction string
+
+	deliverable, doneNotes, notDoneNotes string
+	nextStep, filesLinks, tweak          string
+
+	focus *int
+
+	createdAt string
+	closedAt  *string
+}
+
+// ---------- new-goal form ----------
+
+var goalAddFieldLabels = []string{"Goal", "Day (blank=today, or mon/tue/...)"}
+
+type goalAddFormState struct {
+	fields [2]string
+	field  int
+	errMsg string
+}
+
 // ---------- model ----------
 
 type tuiModel struct {
@@ -113,11 +158,18 @@ type tuiModel struct {
 	projects   []tuiProject
 	projectCur int
 
-	mode      string // "browse" | "close" | "start_project" | "start_fields"
+	mode      string // "browse" | "close" | "start_project" | "start_fields" | "block_detail"
 	form      closeFormState
 	startForm startFormState
-	status    string
-	err       error
+
+	newProjectForm newProjectFormState
+	addSleepForm   addSleepFormState
+
+	blockDetail tuiBlockDetail
+	goalAddForm goalAddFormState
+
+	status string
+	err    error
 
 	width, height int
 }
@@ -324,6 +376,14 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.updateStartProject(msg)
 		case "start_fields":
 			return m.updateStartFields(msg)
+		case "new_project":
+			return m.updateNewProjectForm(msg)
+		case "add_sleep":
+			return m.updateAddSleepForm(msg)
+		case "block_detail":
+			return m.updateBlockDetail(msg)
+		case "new_goal":
+			return m.updateGoalAddForm(msg)
 		}
 		return m.updateBrowse(msg)
 	}
@@ -394,25 +454,56 @@ func (m tuiModel) updateBrowse(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case "n":
-		if m.tab == tabBlocks {
+		switch m.tab {
+		case tabBlocks:
 			if len(m.projects) == 0 {
 				m.status = "No projects yet — add one with 'journal project add' first."
 				return m, nil
 			}
 			m.mode = "start_project"
 			m.projectCur = 0
+		case tabGoals:
+			m.mode = "new_goal"
+			m.goalAddForm = goalAddFormState{}
+		}
+		return m, nil
+
+	case "p":
+		m.mode = "new_project"
+		m.newProjectForm = newProjectFormState{}
+		return m, nil
+
+	case "a":
+		if m.tab == tabSleep {
+			m.mode = "add_sleep"
+			m.addSleepForm = addSleepFormState{}
 		}
 		return m, nil
 
 	case "enter", " ":
-		if m.tab == tabGoals && len(m.goals) > 0 {
-			g := &m.goals[m.goalCur]
-			newDone := !g.done
-			if _, err := conn.Exec(`UPDATE weekly_goals SET done = ? WHERE id = ?`, newDone, g.id); err != nil {
-				m.err = err
-			} else {
-				g.done = newDone
-				m.err = nil
+		switch m.tab {
+		case tabGoals:
+			if len(m.goals) > 0 {
+				g := &m.goals[m.goalCur]
+				newDone := !g.done
+				if _, err := conn.Exec(`UPDATE weekly_goals SET done = ? WHERE id = ?`, newDone, g.id); err != nil {
+					m.err = err
+				} else {
+					g.done = newDone
+					m.err = nil
+				}
+			}
+		case tabBlocks:
+			if msg.String() == "enter" && len(m.blocks) > 0 {
+				blk := m.blocks[m.blockCur]
+				detail, err := loadBlockDetail(blk.id)
+				if err != nil {
+					m.err = err
+				} else {
+					m.err = nil
+					m.blockDetail = detail
+					m.mode = "block_detail"
+				}
 			}
 		}
 		return m, nil
@@ -626,6 +717,297 @@ func (m tuiModel) submitStartForm() (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+func (m tuiModel) updateNewProjectForm(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "esc":
+		m.mode = "browse"
+		return m, nil
+
+	case "ctrl+c":
+		return m, tea.Quit
+
+	case "backspace":
+		if s := m.newProjectForm.name; len(s) > 0 {
+			m.newProjectForm.name = s[:len(s)-1]
+		}
+		return m, nil
+
+	case "enter":
+		return m.submitNewProjectForm()
+	}
+
+	if msg.Type == tea.KeyRunes || msg.Type == tea.KeySpace {
+		m.newProjectForm.name += msg.String()
+	}
+	return m, nil
+}
+
+func (m tuiModel) submitNewProjectForm() (tea.Model, tea.Cmd) {
+	name := strings.TrimSpace(m.newProjectForm.name)
+	if name == "" {
+		m.newProjectForm.errMsg = "Project name can't be blank."
+		return m, nil
+	}
+
+	res, err := conn.Exec(`INSERT OR IGNORE INTO projects (name) VALUES (?)`, name)
+	if err != nil {
+		m.err = err
+		m.mode = "browse"
+		return m, nil
+	}
+
+	rows, _ := res.RowsAffected()
+	m.mode = "browse"
+	if rows == 0 {
+		m.status = fmt.Sprintf("Project %q already exists.", name)
+	} else {
+		m.status = fmt.Sprintf("Project %q added.", name)
+	}
+	if rerr := m.reload(); rerr != nil {
+		m.err = rerr
+	} else {
+		m.err = nil
+	}
+	return m, nil
+}
+
+func (m tuiModel) updateAddSleepForm(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	f := &m.addSleepForm
+
+	switch msg.String() {
+	case "esc":
+		m.mode = "browse"
+		return m, nil
+
+	case "ctrl+c":
+		return m, tea.Quit
+
+	case "backspace":
+		if s := f.fields[f.field]; len(s) > 0 {
+			f.fields[f.field] = s[:len(s)-1]
+		}
+		return m, nil
+
+	case "tab", "down":
+		f.field = (f.field + 1) % len(addSleepFieldLabels)
+		return m, nil
+
+	case "shift+tab", "up":
+		f.field = (f.field - 1 + len(addSleepFieldLabels)) % len(addSleepFieldLabels)
+		return m, nil
+
+	case "enter":
+		if f.field < len(addSleepFieldLabels)-1 {
+			f.field++
+			return m, nil
+		}
+		return m.submitAddSleepForm()
+	}
+
+	if msg.Type == tea.KeyRunes || msg.Type == tea.KeySpace {
+		f.fields[f.field] += msg.String()
+	}
+	return m, nil
+}
+
+func (m tuiModel) submitAddSleepForm() (tea.Model, tea.Cmd) {
+	f := m.addSleepForm
+	dayRaw := strings.TrimSpace(f.fields[0])
+	hoursRaw := strings.TrimSpace(f.fields[1])
+	qualityRaw := strings.TrimSpace(f.fields[2])
+	feelRaw := strings.TrimSpace(f.fields[3])
+
+	day := time.Now().Format("2006-01-02")
+	if dayRaw != "" {
+		if _, err := time.Parse("2006-01-02", dayRaw); err != nil {
+			m.addSleepForm.errMsg = "Day must be YYYY-MM-DD."
+			return m, nil
+		}
+		day = dayRaw
+	}
+
+	hours, err := strconv.ParseFloat(hoursRaw, 64)
+	if err != nil || hours < 0 || hours > 24 {
+		m.addSleepForm.errMsg = "Hours must be a number 0-24."
+		return m, nil
+	}
+	quality, err := strconv.Atoi(qualityRaw)
+	if err != nil || quality < 1 || quality > 10 {
+		m.addSleepForm.errMsg = "Quality must be a number 1-10."
+		return m, nil
+	}
+	feel, err := strconv.Atoi(feelRaw)
+	if err != nil || feel < 1 || feel > 10 {
+		m.addSleepForm.errMsg = "Feel must be a number 1-10."
+		return m, nil
+	}
+
+	_, err = conn.Exec(
+		`INSERT INTO daily_checkin (date, sleep_hours, sleep_quality, feel, notes)
+		 VALUES (?, ?, ?, ?, ?)
+		 ON CONFLICT(date) DO UPDATE SET
+			sleep_hours = excluded.sleep_hours,
+			sleep_quality = excluded.sleep_quality,
+			feel = excluded.feel,
+			notes = CASE WHEN excluded.notes = '' THEN daily_checkin.notes ELSE excluded.notes END`,
+		day, hours, quality, feel, "",
+	)
+	if err != nil {
+		m.err = err
+		m.mode = "browse"
+		return m, nil
+	}
+
+	m.mode = "browse"
+	m.status = fmt.Sprintf("Checkin saved for %s.", day)
+	if rerr := m.reload(); rerr != nil {
+		m.err = rerr
+	} else {
+		m.err = nil
+	}
+	return m, nil
+}
+
+func (m tuiModel) updateBlockDetail(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "ctrl+c":
+		return m, tea.Quit
+	case "esc", "enter", "q":
+		m.mode = "browse"
+		return m, nil
+	}
+	return m, nil
+}
+
+// loadBlockDetail fetches full detail for a single block, mirroring 'journal block show'.
+func loadBlockDetail(id int) (tuiBlockDetail, error) {
+	var d tuiBlockDetail
+	var project sql.NullString
+	var deliverable, doneNotes, notDoneNotes, nextStep, filesLinks, tweak sql.NullString
+	var focus sql.NullInt64
+	var closedAt sql.NullString
+
+	err := conn.QueryRow(`
+		SELECT b.id, b.date, b.block_num, b.day, p.name, b.outcome, b.context_reload, b.first_action,
+		       b.deliverable, b.done_notes, b.not_done_notes, b.next_step, b.files_links,
+		       b.focus_quality, b.tweak, b.created_at, b.closed_at
+		FROM blocks b LEFT JOIN projects p ON p.id = b.project_id
+		WHERE b.id = ?`, id,
+	).Scan(&d.id, &d.date, &d.blockNum, &d.day, &project, &d.outcome, &d.contextReload, &d.firstAction,
+		&deliverable, &doneNotes, &notDoneNotes, &nextStep, &filesLinks,
+		&focus, &tweak, &d.createdAt, &closedAt)
+	if err != nil {
+		return d, err
+	}
+
+	d.project = "-"
+	if project.Valid {
+		d.project = project.String
+	}
+	d.deliverable = nullOr(deliverable)
+	d.doneNotes = nullOr(doneNotes)
+	d.notDoneNotes = nullOr(notDoneNotes)
+	d.nextStep = nullOr(nextStep)
+	d.filesLinks = nullOr(filesLinks)
+	d.tweak = nullOr(tweak)
+	if focus.Valid {
+		f := int(focus.Int64)
+		d.focus = &f
+	}
+	if closedAt.Valid {
+		c := closedAt.String
+		d.closedAt = &c
+	}
+	return d, nil
+}
+
+func nullOr(v sql.NullString) string {
+	if v.Valid && v.String != "" {
+		return v.String
+	}
+	return "-"
+}
+
+func (m tuiModel) updateGoalAddForm(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	f := &m.goalAddForm
+
+	switch msg.String() {
+	case "esc":
+		m.mode = "browse"
+		return m, nil
+
+	case "ctrl+c":
+		return m, tea.Quit
+
+	case "backspace":
+		if s := f.fields[f.field]; len(s) > 0 {
+			f.fields[f.field] = s[:len(s)-1]
+		}
+		return m, nil
+
+	case "tab", "down":
+		f.field = (f.field + 1) % len(goalAddFieldLabels)
+		return m, nil
+
+	case "shift+tab", "up":
+		f.field = (f.field - 1 + len(goalAddFieldLabels)) % len(goalAddFieldLabels)
+		return m, nil
+
+	case "enter":
+		if f.field < len(goalAddFieldLabels)-1 {
+			f.field++
+			return m, nil
+		}
+		return m.submitGoalAddForm()
+	}
+
+	if msg.Type == tea.KeyRunes || msg.Type == tea.KeySpace {
+		f.fields[f.field] += msg.String()
+	}
+	return m, nil
+}
+
+func (m tuiModel) submitGoalAddForm() (tea.Model, tea.Cmd) {
+	f := m.goalAddForm
+	text := strings.TrimSpace(f.fields[0])
+	dayRaw := strings.TrimSpace(f.fields[1])
+
+	if text == "" {
+		m.goalAddForm.errMsg = "Goal text can't be blank."
+		return m, nil
+	}
+
+	day := time.Now().Format("Mon")
+	if dayRaw != "" {
+		canonical, ok := validDays[strings.ToLower(dayRaw)]
+		if !ok {
+			m.goalAddForm.errMsg = "Day must be one of: mon tue wed thu fri sat sun."
+			return m, nil
+		}
+		day = canonical
+	}
+
+	weekStart := mondayOf(time.Now()).Format("2006-01-02")
+	_, err := conn.Exec(
+		`INSERT INTO weekly_goals (week_start, day, goal) VALUES (?, ?, ?)`,
+		weekStart, day, text,
+	)
+	if err != nil {
+		m.err = err
+		m.mode = "browse"
+		return m, nil
+	}
+
+	m.mode = "browse"
+	m.status = fmt.Sprintf("Goal added for %s.", day)
+	if rerr := m.reload(); rerr != nil {
+		m.err = rerr
+	} else {
+		m.err = nil
+	}
+	return m, nil
+}
+
 // ---------- View ----------
 
 func (m tuiModel) View() string {
@@ -649,6 +1031,14 @@ func (m tuiModel) View() string {
 		b.WriteString(m.viewStartProject())
 	case "start_fields":
 		b.WriteString(m.viewStartFields())
+	case "new_project":
+		b.WriteString(m.viewNewProjectForm())
+	case "add_sleep":
+		b.WriteString(m.viewAddSleepForm())
+	case "block_detail":
+		return "esc/enter/q: back to list"
+	case "new_goal":
+		b.WriteString(m.viewGoalAddForm())
 	default:
 		switch m.tab {
 		case tabBlocks:
@@ -678,18 +1068,22 @@ func (m tuiModel) View() string {
 
 func (m tuiModel) helpLine() string {
 	switch m.mode {
-	case "close", "start_fields":
+	case "close", "start_fields", "add_sleep", "new_goal":
 		return "tab/↓: next field  •  shift+tab/↑: prev field  •  enter (last field): save  •  esc: cancel"
 	case "start_project":
 		return "↑↓/jk: move  •  enter: pick project  •  esc: cancel"
+	case "new_project":
+		return "type name  •  enter: save  •  esc: cancel"
 	}
 	switch m.tab {
 	case tabBlocks:
-		return "tab: switch section  •  ↑↓/jk: move  •  n: new block  •  c: close selected open block  •  r: reload  •  q: quit"
+		return "tab: switch section  •  ↑↓/jk: move  •  enter: view block  •  n: new block  •  c: close selected open block  •  r: reload  •  q: quit"
 	case tabGoals:
-		return "tab: switch section  •  ↑↓/jk: move  •  enter/space: toggle done  •  r: reload  •  q: quit"
+		return "tab: switch section  •  ↑↓/jk: move  •  n: new goal  •  enter/space: toggle done  •  r: reload  •  q: quit"
+	case tabSleep:
+		return "tab: switch section  •  a: add/update sleep checkin  •  p: new project  •  r: reload  •  q: quit"
 	default:
-		return "tab: switch section  •  r: reload  •  q: quit"
+		return "tab: switch section  •  p: new project  •  r: reload  •  q: quit"
 	}
 }
 
@@ -715,7 +1109,8 @@ func (m tuiModel) viewBlocks() string {
 		if i == m.blockCur {
 			b.WriteString(cursorStyle.Render("> " + line))
 		} else {
-			b.WriteString("  " + line)
+			b.WriteString("  ")
+			b.WriteString(line)
 		}
 		b.WriteString("\n")
 	}
@@ -741,7 +1136,8 @@ func (m tuiModel) viewGoals() string {
 		if i == m.goalCur {
 			b.WriteString(cursorStyle.Render("> " + line))
 		} else {
-			b.WriteString("  " + line)
+			b.WriteString("  ")
+			b.WriteString(line)
 		}
 		b.WriteString("\n")
 	}
@@ -822,7 +1218,8 @@ func (m tuiModel) viewStartProject() string {
 		if i == m.projectCur {
 			b.WriteString(cursorStyle.Render("> " + p.name))
 		} else {
-			b.WriteString("  " + p.name)
+			b.WriteString("  ")
+			b.WriteString(p.name)
 		}
 		b.WriteString("\n")
 	}
@@ -842,6 +1239,97 @@ func (m tuiModel) viewStartFields() string {
 			marker = cursorStyle.Render("> ")
 		}
 		b.WriteString(fmt.Sprintf("%s%-16s %s\n", marker, label+":", f.fields[i]))
+	}
+	if f.errMsg != "" {
+		b.WriteString("\n")
+		b.WriteString(errStyle.Render(f.errMsg))
+		b.WriteString("\n")
+	}
+	return b.String()
+}
+
+func (m tuiModel) viewNewProjectForm() string {
+	var b strings.Builder
+	b.WriteString(bannerStyle.Render("New project"))
+	b.WriteString("\n")
+	b.WriteString(fmt.Sprintf("%s%-14s %s\n", cursorStyle.Render("> "), "Name:", m.newProjectForm.name))
+	if m.newProjectForm.errMsg != "" {
+		b.WriteString("\n")
+		b.WriteString(errStyle.Render(m.newProjectForm.errMsg))
+		b.WriteString("\n")
+	}
+	return b.String()
+}
+
+func (m tuiModel) viewAddSleepForm() string {
+	f := m.addSleepForm
+
+	var b strings.Builder
+	b.WriteString(bannerStyle.Render("Add/update sleep checkin"))
+	b.WriteString("\n")
+	for i, label := range addSleepFieldLabels {
+		marker := "  "
+		if i == f.field {
+			marker = cursorStyle.Render("> ")
+		}
+		b.WriteString(fmt.Sprintf("%s%-20s %s\n", marker, label+":", f.fields[i]))
+	}
+	if f.errMsg != "" {
+		b.WriteString("\n")
+		b.WriteString(errStyle.Render(f.errMsg))
+		b.WriteString("\n")
+	}
+	return b.String()
+}
+
+func (m tuiModel) viewBlockDetail() string {
+	d := m.blockDetail
+
+	var b strings.Builder
+	b.WriteString(bannerStyle.Render(fmt.Sprintf("Block #%d (id=%d) — %s (%s)", d.blockNum, d.id, d.date, d.day)))
+	b.WriteString("\n")
+
+	row := func(label, val string) {
+		b.WriteString(fmt.Sprintf("%-16s %s\n", label+":", val))
+	}
+
+	row("Project", d.project)
+	row("Outcome", d.outcome)
+	row("Context reload", d.contextReload)
+	row("First action", d.firstAction)
+	row("Deliverable", d.deliverable)
+	row("Done", d.doneNotes)
+	row("Not done", d.notDoneNotes)
+	row("Next step", d.nextStep)
+	row("Files/links", d.filesLinks)
+	focus := "-"
+	if d.focus != nil {
+		focus = strconv.Itoa(*d.focus)
+	}
+	row("Focus quality", focus)
+	row("Tweak", d.tweak)
+	status := "open"
+	if d.closedAt != nil {
+		status = "closed at " + *d.closedAt
+	}
+	row("Status", status)
+	row("Created", d.createdAt)
+
+	return b.String()
+}
+
+func (m tuiModel) viewGoalAddForm() string {
+	f := m.goalAddForm
+
+	var b strings.Builder
+	b.WriteString(bannerStyle.Render("New goal"))
+	b.WriteString("\n")
+	for i, label := range goalAddFieldLabels {
+		marker := "  "
+		if i == f.field {
+			marker = cursorStyle.Render("> ")
+		}
+		b.WriteString(fmt.Sprintf("%s%-32s %s\n", marker, label+":", f.fields[i]))
 	}
 	if f.errMsg != "" {
 		b.WriteString("\n")
