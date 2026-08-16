@@ -36,9 +36,14 @@ var updateCmd = &cobra.Command{
 			fmt.Println("Nothing entered, no changes made.")
 			return nil
 		}
+		tx, err := conn.Begin()
+		if err != nil {
+			return err
+		}
+		defer tx.Rollback()
 
 		if doneNotes != "" {
-			_, err = conn.Exec(
+			_, err = tx.Exec(
 				`UPDATE blocks SET done_notes = CASE
 					WHEN done_notes IS NULL OR done_notes = '' THEN ?
 					ELSE done_notes || ' | ' || ?
@@ -50,7 +55,7 @@ var updateCmd = &cobra.Command{
 			}
 		}
 		if deliverable != "" {
-			_, err = conn.Exec(
+			_, err = tx.Exec(
 				`UPDATE blocks SET deliverable = CASE
 					WHEN deliverable IS NULL OR deliverable = '' THEN ?
 					ELSE deliverable || ' | ' || ?
@@ -62,7 +67,7 @@ var updateCmd = &cobra.Command{
 			}
 		}
 		if filesLinks != "" {
-			_, err = conn.Exec(
+			_, err = tx.Exec(
 				`UPDATE blocks SET files_links = CASE
 					WHEN files_links IS NULL OR files_links = '' THEN ?
 					ELSE files_links || ' | ' || ?
@@ -72,6 +77,9 @@ var updateCmd = &cobra.Command{
 			if err != nil {
 				return err
 			}
+		}
+		if err := tx.Commit(); err != nil {
+			return err
 		}
 
 		fmt.Printf("Block #%d updated (id=%d)\n", blockNum, id)

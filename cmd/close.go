@@ -35,7 +35,13 @@ var closeCmd = &cobra.Command{
 		focus := askInt(reader, "Focus quality", 1, 10)
 		tweak := askOptional(reader, "One tweak for next block")
 
-		_, err = conn.Exec(
+		tx, err := conn.Begin()
+		if err != nil {
+			return err
+		}
+		defer tx.Rollback()
+
+		_, err = tx.Exec(
 			`UPDATE blocks
 			 SET done_notes = ?, not_done_notes = ?, next_step = ?,
 			     focus_quality = ?, tweak = ?,
@@ -43,20 +49,26 @@ var closeCmd = &cobra.Command{
 			 WHERE id = ?`,
 			done, notDone, nextStep, focus, tweak, id,
 		)
+		if err != nil {
+			return err
+		}
 
 		if filesLinks != "" {
-			_, err = conn.Exec(
+			_, err = tx.Exec(
 				`UPDATE blocks SET files_links = CASE
 					WHEN files_links IS NULL OR files_links = '' THEN ?
 					ELSE files_links || ' | ' || ?
 				 END WHERE id = ?`,
 				filesLinks, filesLinks, id,
 			)
-		}
-		if err != nil {
-			return err
+			if err != nil {
+				return err
+			}
 		}
 
+		if err := tx.Commit(); err != nil {
+			return err
+		}
 		fmt.Printf("Block #%d closed (id=%d)\n", blockNum, id)
 		return nil
 	},

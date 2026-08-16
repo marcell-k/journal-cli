@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"bufio"
+	"database/sql"
 	"fmt"
 	"os"
 	"time"
@@ -14,6 +15,16 @@ var startCmd = &cobra.Command{
 	Short: "Start a new block",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		reader := bufio.NewReader(os.Stdin)
+		var openID int
+		err := conn.QueryRow(
+			`SELECT id FROM blocks WHERE closed_at IS NULL ORDER BY id DESC LIMIT 1`,
+		).Scan(&openID)
+		if err != nil && err != sql.ErrNoRows {
+			return err
+		}
+		if err == nil {
+			return fmt.Errorf("block id=%d is still open — run 'journal close' first", openID)
+		}
 
 		projectID, err := selectProject(reader)
 		if err != nil {
