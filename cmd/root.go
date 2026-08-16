@@ -7,6 +7,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"time"
 
 	"journal/internal/db"
 
@@ -74,4 +75,23 @@ func askOptional(reader *bufio.Reader, prompt string) string {
 	fmt.Print(prompt + " (leave blank to skip): ")
 	text, _ := reader.ReadString('\n')
 	return strings.TrimSpace(text)
+}
+
+func parseTimestamp(s string) (time.Time, error) {
+	if t, err := time.Parse("2006-01-02 15:04:05", s); err == nil {
+		return t, nil
+	}
+	return time.Parse(time.RFC3339, s)
+}
+
+func formatDuration(d time.Duration) string {
+	if d < 0 {
+		d = -d
+	}
+	h := int(d.Hours())
+	m := int(d.Minutes()) % 60
+	if h > 0 {
+		return fmt.Sprintf("%dh%02dm", h, m)
+	}
+	return fmt.Sprintf("%dm", m)
 }

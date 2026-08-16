@@ -158,6 +158,15 @@ var blockShowCmd = &cobra.Command{
 		if closedAt.Valid {
 			status = "closed at " + closedAt.String
 		}
+		durationStr := "-"
+		if closedAt.Valid {
+			ct, err1 := parseTimestamp(createdAt)
+			ct2, err2 := parseTimestamp(closedAt.String)
+			if err1 == nil && err2 == nil {
+				durationStr = formatDuration(ct2.Sub(ct))
+			}
+		}
+		fmt.Printf("%-16s %s\n", "Duration:", durationStr)
 		fmt.Printf("%-16s %s\n", "Status:", status)
 		fmt.Printf("%-16s %s\n", "Created:", createdAt)
 		return nil

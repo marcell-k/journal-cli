@@ -241,6 +241,7 @@ type tuiModel struct {
 
 	metrics                   []tuiMetric
 	correlation               tuiCorrelation
+	weeklyTrend               tuiWeeklyTrend
 	blockPosStats             []tuiBlockPosStat
 	weekdayBest, weekdayWorst tuiWeekdayStat
 	focusHist                 [5]int
@@ -345,6 +346,12 @@ func (m *tuiModel) reload() error {
 		return err
 	}
 	m.correlation = correlation
+
+	weeklyTrend, err := loadWeeklyTrend(weekStart)
+	if err != nil {
+		return err
+	}
+	m.weeklyTrend = weeklyTrend
 
 	blockPosStats, err := loadBlockPosStats()
 	if err != nil {
@@ -565,16 +572,103 @@ func loadTUICorrelation() (tuiCorrelation, error) {
 func rLine(r float64) string {
 	abs := math.Abs(r)
 	style := dimStyle
-	label := "weak"
 	switch {
 	case abs > 0.6:
 		style = focusHighStyle
-		label = "strong"
 	case abs >= 0.3:
 		style = focusMidStyle
-		label = "moderate"
 	}
-	return style.Render(fmt.Sprintf("r=%.2f  (%s)", r, label))
+	return style.Render(fmt.Sprintf("r=%5.2f  %-10s", r, scaledBar(abs, 1.0, 10)))
+}
+
+type tuiWeeklyTrend struct {
+	sleepHours [7]float64
+	sleepHas   [7]bool
+	focusAvg   [7]float64
+	focusHas   [7]bool
+}
+
+func loadWeeklyTrend(weekStart string) (tuiWeeklyTrend, error) {
+	var t tuiWeeklyTrend
+	dates := weekDates(weekStart)
+	idx := make(map[string]int, 7)
+	for i, d := range dates {
+		idx[d] = i
+	}
+
+	sleepRows, err := conn.Query(
+		`SELECT date, sleep_hours FROM daily_checkin WHERE date >= ? AND date <= ?`,
+		dates[0], dates[6],
+	)
+	if err != nil {
+		return t, err
+	}
+	for sleepRows.Next() {
+		var rawDate string
+		var hours float64
+		if err := sleepRows.Scan(&rawDate, &hours); err != nil {
+			sleepRows.Close()
+			return t, err
+		}
+		d := rawDate
+		if pt, perr := time.Parse(time.RFC3339, rawDate); perr == nil {
+			d = pt.Format("2006-01-02")
+		}
+		if i, ok := idx[d]; ok {
+			t.sleepHours[i] = hours
+			t.sleepHas[i] = true
+		}
+	}
+	if err := sleepRows.Err(); err != nil {
+		sleepRows.Close()
+		return t, err
+	}
+	sleepRows.Close()
+
+	focusRows, err := conn.Query(
+		`SELECT date, AVG(focus_quality) FROM blocks
+		 WHERE date >= ? AND date <= ? AND focus_quality IS NOT NULL
+		 GROUP BY date`,
+		dates[0], dates[6],
+	)
+	if err != nil {
+		return t, err
+	}
+	defer focusRows.Close()
+	for focusRows.Next() {
+		var date string
+		var avg float64
+		if err := focusRows.Scan(&date, &avg); err != nil {
+			return t, err
+		}
+		if i, ok := idx[date]; ok {
+			t.focusAvg[i] = avg
+			t.focusHas[i] = true
+		}
+	}
+	return t, focusRows.Err()
+}
+
+var sparkChars = []rune{'▁', '▂', '▃', '▄', '▅', '▆', '▇', '█'}
+
+// sparkline renders one glyph per day; days with no data show '·'.
+func sparkline(values []float64, has []bool, max float64) string {
+	var sb strings.Builder
+	for i, v := range values {
+		if !has[i] {
+			sb.WriteRune('·')
+			continue
+		}
+		level := int(v / max * float64(len(sparkChars)-1))
+		if level < 0 {
+			level = 0
+		}
+		if level >= len(sparkChars) {
+			level = len(sparkChars) - 1
+		}
+		sb.WriteRune(sparkChars[level])
+	}
+	return sb.String()
 }
 
 // weekGoalStats returns done/total goal counts for a week.
@@ -1028,6 +1122,7 @@ func (m tuiModel) updateBrowse(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				valOrEmpty(d.nextStep), valOrEmpty(d.filesLinks), focusStr, valOrEmpty(d.tweak),
 			})
 			m.f.ctxID = b.id
+			m.f.field = 3
 		case tabGoals:
 			w := m.currentGoalWeek()
 			if w == nil || m.goalCurDay < 0 || m.goalCurGoal < 0 {
@@ -1972,6 +2067,14 @@ func (m tuiModel) viewProjects() string {
 
 func (m tuiModel) viewMetrics() string {
 	var b strings.Builder
+
+	b.WriteString(headerStyle.Render("=== Weekly trend ==="))
+	b.WriteString("\n")
+	b.WriteString(fmt.Sprintf("       %s\n", "MTWTFSS"))
+	b.WriteString(fmt.Sprintf("Sleep  %s\n", sparkline(m.weeklyTrend.sleepHours[:], m.weeklyTrend.sleepHas[:], 12)))
+	b.WriteString(fmt.Sprintf("Focus  %s\n", sparkline(m.weeklyTrend.focusAvg[:], m.weeklyTrend.focusHas[:], 10)))
+	b.WriteString("\n")
+
 	b.WriteString(headerStyle.Render("=== Blocks by project (this week) ==="))
 	b.WriteString("\n")
 
@@ -2214,9 +2317,7 @@ func scaledBar(value, max float64, maxWidth int) string {
 		return ""
 	}
 	w := int(math.Round(value / max * float64(maxWidth)))
-	if w > maxWidth {
-		w = maxWidth
-	}
+	w = min(w, maxWidth)
 	if w < 0 {
 		w = 0
 	}
@@ -2315,6 +2416,15 @@ func (m tuiModel) viewBlockDetail() string {
 		status = statusStyle("CLOSED").Render("CLOSED") + " at " + *d.closedAt
 	}
 	row("Status", status)
+	durationStr := "-"
+	if d.closedAt != nil {
+		if ct, err1 := parseTimestamp(d.createdAt); err1 == nil {
+			if ct2, err2 := parseTimestamp(*d.closedAt); err2 == nil {
+				durationStr = formatDuration(ct2.Sub(ct))
+			}
+		}
+	}
+	row("Duration", durationStr)
 	row("Created", d.createdAt)
 
 	return b.String()
