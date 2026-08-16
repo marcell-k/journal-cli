@@ -1,0 +1,90 @@
+package cmd
+
+import (
+	"bufio"
+	"database/sql"
+	"fmt"
+	"os"
+	"strings"
+
+	"github.com/spf13/cobra"
+)
+
+var updateCmd = &cobra.Command{
+	Use:   "update",
+	Short: "Update done notes / files-links on the currently open block, mid-session",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		var id int
+		var blockNum int
+		err := conn.QueryRow(
+			`SELECT id, block_num FROM blocks WHERE closed_at IS NULL ORDER BY id DESC LIMIT 1`,
+		).Scan(&id, &blockNum)
+		if err == sql.ErrNoRows {
+			fmt.Println("No open block found. Run 'journal start' first.")
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+
+		reader := bufio.NewReader(os.Stdin)
+		ask := func(prompt string) string {
+			fmt.Print(prompt + " (leave blank to skip): ")
+			text, _ := reader.ReadString('\n')
+			return strings.TrimSpace(text)
+		}
+
+		doneNotes := ask("Done notes")
+		deliverable := ask("Deliverable/checkpoint")
+		filesLinks := ask("Files/links")
+
+		if doneNotes == "" && deliverable == "" && filesLinks == "" {
+			fmt.Println("Nothing entered, no changes made.")
+			return nil
+		}
+
+		if doneNotes != "" {
+			_, err = conn.Exec(
+				`UPDATE blocks SET done_notes = CASE
+					WHEN done_notes IS NULL OR done_notes = '' THEN ?
+					ELSE done_notes || ' | ' || ?
+				 END WHERE id = ?`,
+				doneNotes, doneNotes, id,
+			)
+			if err != nil {
+				return err
+			}
+		}
+		if deliverable != "" {
+			_, err = conn.Exec(
+				`UPDATE blocks SET deliverable = CASE
+					WHEN deliverable IS NULL OR deliverable = '' THEN ?
+					ELSE deliverable || ' | ' || ?
+				 END WHERE id = ?`,
+				deliverable, deliverable, id,
+			)
+			if err != nil {
+				return err
+			}
+		}
+		if filesLinks != "" {
+			_, err = conn.Exec(
+				`UPDATE blocks SET files_links = CASE
+					WHEN files_links IS NULL OR files_links = '' THEN ?
+					ELSE files_links || ' | ' || ?
+				 END WHERE id = ?`,
+				filesLinks, filesLinks, id,
+			)
+			if err != nil {
+				return err
+			}
+		}
+
+		fmt.Printf("Block #%d updated (id=%d)\n", blockNum, id)
+		return nil
+	},
+}
+
+func init() {
+	rootCmd.AddCommand(updateCmd)
+}
