@@ -156,7 +156,11 @@ var blockShowCmd = &cobra.Command{
 		printField("Tweak", tweak)
 		status := "open"
 		if closedAt.Valid {
-			status = "closed at " + closedAt.String
+			closedDisplay := closedAt.String
+			if ct, err := parseTimestamp(closedAt.String); err == nil {
+				closedDisplay = ct.Format("2006-01-02 15:04")
+			}
+			status = "closed at " + closedDisplay
 		}
 		durationStr := "-"
 		if closedAt.Valid {
@@ -168,7 +172,11 @@ var blockShowCmd = &cobra.Command{
 		}
 		fmt.Printf("%-16s %s\n", "Duration:", durationStr)
 		fmt.Printf("%-16s %s\n", "Status:", status)
-		fmt.Printf("%-16s %s\n", "Created:", createdAt)
+		createdDisplay := createdAt
+		if ct, err := parseTimestamp(createdAt); err == nil {
+			createdDisplay = ct.Format("2006-01-02 15:04")
+		}
+		fmt.Printf("%-16s %s\n", "Created:", createdDisplay)
 		return nil
 	},
 }

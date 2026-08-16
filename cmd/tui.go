@@ -2413,7 +2413,11 @@ func (m tuiModel) viewBlockDetail() string {
 	row("Tweak", d.tweak)
 	status := statusStyle("OPEN").Render("OPEN")
 	if d.closedAt != nil {
-		status = statusStyle("CLOSED").Render("CLOSED") + " at " + *d.closedAt
+		closedDisplay := *d.closedAt
+		if ct, err := parseTimestamp(*d.closedAt); err == nil {
+			closedDisplay = ct.Format("2006-01-02 15:04")
+		}
+		status = statusStyle("CLOSED").Render("CLOSED") + " at " + closedDisplay
 	}
 	row("Status", status)
 	durationStr := "-"
@@ -2425,7 +2429,11 @@ func (m tuiModel) viewBlockDetail() string {
 		}
 	}
 	row("Duration", durationStr)
-	row("Created", d.createdAt)
+	createdDisplay := d.createdAt
+	if ct, err := parseTimestamp(d.createdAt); err == nil {
+		createdDisplay = ct.Format("2006-01-02 15:04")
+	}
+	row("Created", createdDisplay)
 
 	return b.String()
 }
