@@ -9,6 +9,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/lipgloss/table"
 	"github.com/spf13/cobra"
 )
 
@@ -31,8 +32,16 @@ var (
 	activeTabStyle   = lipgloss.NewStyle().Padding(0, 2).Bold(true).Foreground(lipgloss.Color("#e6c384")).Underline(true)
 	inactiveTabStyle = lipgloss.NewStyle().Padding(0, 2).Foreground(lipgloss.Color("#a6a69c"))
 	headerStyle      = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#e6c384"))
-	bannerStyle      = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#7fb4ca")).
-				Border(lipgloss.RoundedBorder()).Padding(0, 1).MarginTop(1).MarginBottom(1)
+	tableHeaderStyle = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#e6c384")).Padding(0, 1)
+	tableCellStyle   = lipgloss.NewStyle().Padding(0, 1)
+	tableBorderStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#4a4a45"))
+	rowSelectedStyle = lipgloss.NewStyle().Padding(0, 1).Bold(true).Foreground(lipgloss.Color("#e6c384"))
+	focusHighStyle   = lipgloss.NewStyle().Padding(0, 1).Foreground(lipgloss.Color("#87a987"))
+	focusMidStyle    = lipgloss.NewStyle().Padding(0, 1).Foreground(lipgloss.Color("#e6c384"))
+	focusLowStyle    = lipgloss.NewStyle().Padding(0, 1).Foreground(lipgloss.Color("#e46876"))
+
+	bannerStyle = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#7fb4ca")).
+			Border(lipgloss.RoundedBorder()).Padding(0, 1).MarginTop(1).MarginBottom(1)
 	cursorStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#e6c384"))
 	dimStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("#a6a69c"))
 	errStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("#e46876"))
@@ -170,8 +179,12 @@ func (f *form) handleKey(msg tea.KeyMsg) (submitted bool) {
 }
 
 var (
-	closeFieldLabels         = []string{"Done", "Not done", "Next step", "Files/links", "Focus (1-10)", "Tweak"}
-	blockUpdateFieldLabels   = []string{"Done notes", "Deliverable/checkpoint", "Files/links"}
+	closeFieldLabels       = []string{"Done", "Not done", "Next step", "Files/links", "Focus (1-10)", "Tweak"}
+	blockUpdateFieldLabels = []string{
+		"Outcome", "Context reload", "First action",
+		"Deliverable", "Done notes", "Not done notes",
+		"Next step", "Files/links", "Focus (1-10, blank=-)", "Tweak",
+	}
 	blockStartFieldLabels    = []string{"Outcome", "Context reload", "First action"}
 	sleepFieldLabels         = []string{"Day (blank=today)", "Hours", "Quality (1-10)", "Feel (1-10)"}
 	goalAddFieldLabels       = []string{"Goal", "Day (blank=today, or mon/tue/...)"}
@@ -467,6 +480,16 @@ func loadGoalWeek(weekStart string, num int) (goalsWeek, error) {
 	return w, rows.Err()
 }
 
+func statusStyle(status string) lipgloss.Style {
+	switch status {
+	case "OPEN":
+		return okStyle
+	case "CLOSED":
+		return dimStyle
+	default:
+		return tableCellStyle
+	}
+}
 func loadGoalWeeks(currentWeekStart string, count int) ([]goalsWeek, error) {
 	firstStart, err := firstWeekStart()
 
@@ -862,13 +885,26 @@ func (m tuiModel) updateBrowse(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 			b := m.blocks[m.blockCur]
-			if b.closed {
-				m.status = "That block is already closed."
+			d, err := loadBlockDetail(b.id)
+			if err != nil {
+				m.err = err
 				return m, nil
 			}
+			focusStr := ""
+			if d.focus != nil {
+				focusStr = strconv.Itoa(*d.focus)
+			}
+			// if b.closed {
+			// 	m.status = "That block is already closed."
+			// 	return m, nil
+			// }
 			m.mode = "form"
 			m.formPurpose = "block_update"
-			m.f = newForm(fmt.Sprintf("Updating block #%d — %s", b.blockNum, b.outcome), blockUpdateFieldLabels, nil)
+			m.f = newForm(fmt.Sprintf("Updating block #%d", b.blockNum), blockUpdateFieldLabels, []string{
+				valOrEmpty(d.outcome), valOrEmpty(d.contextReload), valOrEmpty(d.firstAction),
+				valOrEmpty(d.deliverable), valOrEmpty(d.doneNotes), valOrEmpty(d.notDoneNotes),
+				valOrEmpty(d.nextStep), valOrEmpty(d.filesLinks), focusStr, valOrEmpty(d.tweak),
+			})
 			m.f.ctxID = b.id
 		case tabGoals:
 			w := m.currentGoalWeek()
@@ -955,10 +991,10 @@ func (m tuiModel) updateBrowse(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "c":
 		if m.tab == tabBlocks && len(m.blocks) > 0 {
 			b := m.blocks[m.blockCur]
-			if b.closed {
-				m.status = "That block is already closed."
-				return m, nil
-			}
+			// if b.closed {
+			// 	m.status = "That block is already closed."
+			// 	return m, nil
+			// }
 			m.mode = "form"
 			m.formPurpose = "block_close"
 			m.f = newForm(fmt.Sprintf("Closing block #%d — %s", b.blockNum, b.outcome), closeFieldLabels, nil)
@@ -1004,9 +1040,13 @@ func (m tuiModel) updateBrowse(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 	return m, nil
 }
+func valOrEmpty(s string) string {
+	if s == "-" {
+		return ""
+	}
+	return s
+}
 
-// updateFormMode handles the shared "form" mode; navigation/typing is
-// delegated to form.handleKey, submission is dispatched by formPurpose.
 func (m tuiModel) updateFormMode(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "esc":
@@ -1138,45 +1178,43 @@ func (m tuiModel) submitBlockStart() (tea.Model, tea.Cmd) {
 }
 
 func (m tuiModel) submitBlockUpdate() (tea.Model, tea.Cmd) {
-	doneNotes := strings.TrimSpace(m.f.values[0])
-	deliverable := strings.TrimSpace(m.f.values[1])
-	filesLinks := strings.TrimSpace(m.f.values[2])
+	outcome := strings.TrimSpace(m.f.values[0])
+	contextReload := strings.TrimSpace(m.f.values[1])
+	firstAction := strings.TrimSpace(m.f.values[2])
+	deliverable := strings.TrimSpace(m.f.values[3])
+	doneNotes := strings.TrimSpace(m.f.values[4])
+	notDoneNotes := strings.TrimSpace(m.f.values[5])
+	nextStep := strings.TrimSpace(m.f.values[6])
+	filesLinks := strings.TrimSpace(m.f.values[7])
+	focusRaw := strings.TrimSpace(m.f.values[8])
+	tweak := strings.TrimSpace(m.f.values[9])
 
-	if doneNotes == "" && deliverable == "" && filesLinks == "" {
-		m.mode = "browse"
-		m.status = "Nothing entered, no changes made."
+	if outcome == "" || contextReload == "" || firstAction == "" {
+		m.f.errMsg = "Outcome, context reload, and first action can't be blank."
 		return m, nil
+	}
+	var focus interface{}
+	if focusRaw != "" {
+		f, err := strconv.Atoi(focusRaw)
+		if err != nil || f < 1 || f > 10 {
+			m.f.errMsg = "Focus quality must be blank or a number 1-10."
+			return m, nil
+		}
+		focus = f
 	}
 
 	id := m.f.ctxID
-	var err error
-	if doneNotes != "" {
-		_, err = conn.Exec(
-			`UPDATE blocks SET done_notes = CASE
-				WHEN done_notes IS NULL OR done_notes = '' THEN ?
-				ELSE done_notes || ' | ' || ?
-			 END WHERE id = ?`,
-			doneNotes, doneNotes, id,
-		)
-	}
-	if err == nil && deliverable != "" {
-		_, err = conn.Exec(
-			`UPDATE blocks SET deliverable = CASE
-				WHEN deliverable IS NULL OR deliverable = '' THEN ?
-				ELSE deliverable || ' | ' || ?
-			 END WHERE id = ?`,
-			deliverable, deliverable, id,
-		)
-	}
-	if err == nil && filesLinks != "" {
-		_, err = conn.Exec(
-			`UPDATE blocks SET files_links = CASE
-				WHEN files_links IS NULL OR files_links = '' THEN ?
-				ELSE files_links || ' | ' || ?
-			 END WHERE id = ?`,
-			filesLinks, filesLinks, id,
-		)
-	}
+	_, err := conn.Exec(
+		`UPDATE blocks SET
+			outcome = ?, context_reload = ?, first_action = ?,
+			deliverable = ?, done_notes = ?, not_done_notes = ?,
+			next_step = ?, files_links = ?, focus_quality = ?, tweak = ?
+		 WHERE id = ?`,
+		outcome, contextReload, firstAction,
+		deliverable, doneNotes, notDoneNotes,
+		nextStep, filesLinks, focus, tweak, id,
+	)
+
 	if err != nil {
 		m.err = err
 		m.mode = "browse"
@@ -1507,7 +1545,7 @@ func (m tuiModel) headerBar() string {
 	now := time.Now().In(displayLoc)
 
 	if m.openBlock == nil {
-		return dimStyle.Render("○ No open block — press n on the Blocks tab to start one")
+		return dimStyle.Render("○ No open block")
 	}
 
 	ob := m.openBlock
@@ -1556,17 +1594,83 @@ func (m tuiModel) helpLine() string {
 	}
 }
 
-func (m tuiModel) viewBlocks() string {
-	if len(m.blocks) == 0 {
-		return headerStyle.Render("=== Blocks (this week) ===") + "\n" + dimStyle.Render("No blocks logged this week.")
+func focusStyle(n int) lipgloss.Style {
+	switch {
+	case n <= 0:
+		return tableCellStyle
+	case n <= 3:
+		return focusLowStyle
+	case n <= 7:
+		return focusMidStyle
+	default:
+		return focusHighStyle
 	}
+}
 
+const clampColWidth = 15
+
+var outcomeColWidth = int(float64(clampColWidth) * 1.2)
+
+func dateOnly(s string) string {
+	if len(s) >= 10 {
+		return s[:10]
+	}
+	return s
+}
+
+func (m tuiModel) viewBlocks() string {
 	var b strings.Builder
 	b.WriteString(headerStyle.Render("=== Blocks (this week) ==="))
 	b.WriteString("\n")
 
+	if len(m.blocks) == 0 {
+		b.WriteString(dimStyle.Render("No blocks logged this week."))
+		return b.String()
+	}
+
+	t := table.New().
+		Border(lipgloss.RoundedBorder()).
+		BorderStyle(tableBorderStyle).
+		Headers("#", "Date", "Status", "Project", "Focus", "Outcome").
+		StyleFunc(func(row, col int) lipgloss.Style {
+			if row == table.HeaderRow {
+				return tableHeaderStyle
+			}
+			blk := m.blocks[row]
+			selected := row == m.blockCur
+			switch col {
+			case 2: // Status
+				if selected {
+					return rowSelectedStyle
+				}
+				status := "CLOSED"
+				if !blk.closed {
+					status = "OPEN"
+				}
+				return statusStyle(status).Padding(0, 1)
+			case 4: // Focus
+				if selected {
+					return rowSelectedStyle.Align(lipgloss.Right)
+				}
+				if blk.focus != nil {
+					return focusStyle(*blk.focus)
+				}
+				return tableCellStyle.Align(lipgloss.Right)
+			default:
+				if selected {
+					return rowSelectedStyle
+				}
+				return tableCellStyle
+			}
+		})
+
 	for i, blk := range m.blocks {
-		status := "closed"
+		marker := " "
+		if i == m.blockCur {
+			marker = "▶"
+		}
+		idStr := fmt.Sprintf("%s%*d", marker, 3, blk.blockNum)
+		status := "CLOSED"
 		if !blk.closed {
 			status = "OPEN"
 		}
@@ -1574,16 +1678,23 @@ func (m tuiModel) viewBlocks() string {
 		if blk.focus != nil {
 			focus = strconv.Itoa(*blk.focus)
 		}
-		line := fmt.Sprintf("%s #%-2d [%-6s] %-10s focus:%-2s %s", blk.date, blk.blockNum, status, blk.project, focus, blk.outcome)
-		if i == m.blockCur {
-			b.WriteString(cursorStyle.Render("> " + line))
-		} else {
-			b.WriteString("  ")
-			b.WriteString(line)
-		}
-		b.WriteString("\n")
+		t.Row(idStr, dateOnly(blk.date), truncate(status, clampColWidth), truncate(blk.project, clampColWidth), truncate(focus, clampColWidth), truncate(blk.outcome, outcomeColWidth))
 	}
+
+	b.WriteString(t.Render())
+	b.WriteString("\n")
 	return b.String()
+}
+
+func truncate(s string, n int) string {
+	r := []rune(s)
+	if len(r) <= n {
+		return s
+	}
+	if n <= 1 {
+		return "…"
+	}
+	return string(r[:n-1]) + "…"
 }
 
 func (m tuiModel) viewGoals() string {
@@ -1659,22 +1770,50 @@ func (m tuiModel) viewSleep() string {
 		b.WriteString(dimStyle.Render("No checkins logged this week — press n to add one."))
 		return b.String()
 	}
+	t := table.New().
+		Border(lipgloss.RoundedBorder()).
+		BorderStyle(tableBorderStyle).
+		Headers("", "Date", "Day", "Sleep", "Quality", "Feel").
+		StyleFunc(func(row, col int) lipgloss.Style {
+			if row == table.HeaderRow {
+				return tableHeaderStyle
+			}
+			s := m.sleep[row]
+			selected := row == m.sleepCur
+			switch col {
+			case 4: // Quality
+				if selected {
+					return rowSelectedStyle
+				}
+				return focusStyle(s.quality)
+			case 5: // Feel
+				if selected {
+					return rowSelectedStyle
+				}
+				return focusStyle(s.feel)
+			default:
+				if selected {
+					return rowSelectedStyle
+				}
+				return tableCellStyle
+			}
+		})
 
 	var sumHours float64
 	var sumQuality, sumFeel int
 	for i, s := range m.sleep {
-		line := fmt.Sprintf("%s %-3s  sleep:%.1fh  quality:%d  feel:%d", s.date, s.weekday, s.hours, s.quality, s.feel)
+		marker := " "
 		if i == m.sleepCur {
-			b.WriteString(cursorStyle.Render("> " + line))
-		} else {
-			b.WriteString("  ")
-			b.WriteString(line)
+			marker = "▶"
 		}
-		b.WriteString("\n")
+		t.Row(marker, s.date, s.weekday, fmt.Sprintf("%.1fh", s.hours), strconv.Itoa(s.quality), strconv.Itoa(s.feel))
+
 		sumHours += s.hours
 		sumQuality += s.quality
 		sumFeel += s.feel
 	}
+	b.WriteString(t.Render())
+	b.WriteString("\n")
 	n := float64(len(m.sleep))
 	b.WriteString(fmt.Sprintf("\nAvg sleep: %.1fh | Avg quality: %.1f | Avg feel: %.1f\n",
 		sumHours/n, float64(sumQuality)/n, float64(sumFeel)/n))
@@ -1800,9 +1939,9 @@ func (m tuiModel) viewBlockDetail() string {
 	}
 	row("Focus quality", focus)
 	row("Tweak", d.tweak)
-	status := "open"
+	status := statusStyle("OPEN").Render("OPEN")
 	if d.closedAt != nil {
-		status = "closed at " + *d.closedAt
+		status = statusStyle("CLOSED").Render("CLOSED") + " at " + *d.closedAt
 	}
 	row("Status", status)
 	row("Created", d.createdAt)
