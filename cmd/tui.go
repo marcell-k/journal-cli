@@ -3,6 +3,8 @@ package cmd
 import (
 	"database/sql"
 	"fmt"
+	"math"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -237,7 +239,15 @@ type tuiModel struct {
 	sleep    []tuiSleep
 	sleepCur int
 
-	metrics []tuiMetric
+	metrics                   []tuiMetric
+	correlation               tuiCorrelation
+	blockPosStats             []tuiBlockPosStat
+	weekdayBest, weekdayWorst tuiWeekdayStat
+	focusHist                 [5]int
+	startTimeStats            []tuiStartTimeStat
+	focusMedian               float64
+	focusMean                 float64
+	focusN                    int
 
 	projects   []tuiProject
 	projectCur int
@@ -260,7 +270,7 @@ type tuiModel struct {
 
 func newTUIModel() (tuiModel, error) {
 	m := tuiModel{mode: "browse"}
-	m.goalWeekExpanded = 0
+	m.goalWeekExpanded = 0 // 0
 	m.goalRevealFrom = todayDayIndex()
 	m.goalCurWeek = 0
 	m.goalCurDay = m.goalRevealFrom
@@ -329,6 +339,35 @@ func (m *tuiModel) reload() error {
 		return err
 	}
 	m.metrics = metrics
+
+	correlation, err := loadTUICorrelation()
+	if err != nil {
+		return err
+	}
+	m.correlation = correlation
+
+	blockPosStats, err := loadBlockPosStats()
+	if err != nil {
+		return err
+	}
+	m.blockPosStats = blockPosStats
+
+	best, worst, err := loadWeekdayExtremes()
+	if err != nil {
+		return err
+	}
+	m.weekdayBest, m.weekdayWorst = best, worst
+	startTimeStats, err := loadStartTimeStats()
+	if err != nil {
+		return err
+	}
+	m.startTimeStats = startTimeStats
+
+	hist, median, mean, n, err := loadFocusDistribution()
+	if err != nil {
+		return err
+	}
+	m.focusHist, m.focusMedian, m.focusMean, m.focusN = hist, median, mean, n
 
 	projects, err := loadTUIProjects()
 	if err != nil {
@@ -478,6 +517,89 @@ func loadGoalWeek(weekStart string, num int) (goalsWeek, error) {
 		}
 	}
 	return w, rows.Err()
+}
+
+type tuiCorrelation struct {
+	pairedDays              int
+	rHours, rQuality, rFeel float64
+}
+
+func loadTUICorrelation() (tuiCorrelation, error) {
+	rows, err := conn.Query(`
+		SELECT c.sleep_hours, c.sleep_quality, c.feel, AVG(b.focus_quality)
+		FROM daily_checkin c
+		JOIN blocks b ON b.date = c.date AND b.focus_quality IS NOT NULL
+		GROUP BY c.date
+		ORDER BY c.date`)
+	if err != nil {
+		return tuiCorrelation{}, err
+	}
+	defer rows.Close()
+
+	var hours, quality, feel, focus []float64
+	for rows.Next() {
+		var h, avgFocus float64
+		var q, f int
+		if err := rows.Scan(&h, &q, &f, &avgFocus); err != nil {
+			return tuiCorrelation{}, err
+		}
+		hours = append(hours, h)
+		quality = append(quality, float64(q))
+		feel = append(feel, float64(f))
+		focus = append(focus, avgFocus)
+	}
+	if err := rows.Err(); err != nil {
+		return tuiCorrelation{}, err
+	}
+
+	c := tuiCorrelation{pairedDays: len(hours)}
+	if len(hours) >= 3 {
+		c.rHours = pearson(hours, focus)
+		c.rQuality = pearson(quality, focus)
+		c.rFeel = pearson(feel, focus)
+	}
+	return c, nil
+}
+
+// rLine renders a correlation value colored/labeled by strength.
+func rLine(r float64) string {
+	abs := math.Abs(r)
+	style := dimStyle
+	label := "weak"
+	switch {
+	case abs > 0.6:
+		style = focusHighStyle
+		label = "strong"
+	case abs >= 0.3:
+		style = focusMidStyle
+		label = "moderate"
+	}
+	return style.Render(fmt.Sprintf("r=%.2f  (%s)", r, label))
+}
+
+// weekGoalStats returns done/total goal counts for a week.
+func weekGoalStats(w goalsWeek) (done, total int) {
+	for _, d := range w.days {
+		for _, g := range d.goals {
+			total++
+			if g.done {
+				done++
+			}
+		}
+	}
+	return
+}
+
+const completionBarWidth = 5
+
+func completionBar(done, total int) string {
+	filled := int(math.Round(float64(done) / float64(total) * float64(completionBarWidth)))
+	if filled > completionBarWidth {
+		filled = completionBarWidth
+	}
+	bar := strings.Repeat("■", filled) + strings.Repeat(".", completionBarWidth-filled)
+
+	return fmt.Sprintf("%s %d/%d done", bar, done, total)
 }
 
 func statusStyle(status string) lipgloss.Style {
@@ -1007,7 +1129,11 @@ func (m tuiModel) updateBrowse(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		case tabGoals:
 			if m.goalCurDay == -1 {
 				if msg.String() == "enter" {
-					m.goalWeekExpanded = m.goalCurWeek
+					if m.goalWeekExpanded == m.goalCurWeek {
+						m.goalWeekExpanded = -1
+					} else {
+						m.goalWeekExpanded = m.goalCurWeek
+					}
 				}
 				return m, nil
 			}
@@ -1718,7 +1844,9 @@ func (m tuiModel) viewGoals() string {
 		if wi == m.goalCurWeek && m.goalCurDay == -1 {
 			marker = cursorStyle.Render("> ")
 		}
-		b.WriteString(fmt.Sprintf("%s%s Week %s – %s  #%d\n", marker, arrow, w.weekStart, w.weekEnd, w.num))
+		done, total := weekGoalStats(w)
+		b.WriteString(fmt.Sprintf("%s%s Week %s – %s  #%d   %s\n",
+			marker, arrow, w.weekStart, w.weekEnd, w.num, completionBar(done, total)))
 
 		if wi != m.goalWeekExpanded {
 			continue
@@ -1849,11 +1977,77 @@ func (m tuiModel) viewMetrics() string {
 
 	if len(m.metrics) == 0 {
 		b.WriteString(dimStyle.Render("No blocks logged this week."))
-		return b.String()
+	} else {
+		for _, mt := range m.metrics {
+			b.WriteString(fmt.Sprintf("  %-15s blocks:%-3d avg focus:%.1f\n", mt.project, mt.count, mt.avgFocus))
+		}
 	}
 
-	for _, mt := range m.metrics {
-		b.WriteString(fmt.Sprintf("  %-15s blocks:%-3d avg focus:%.1f\n", mt.project, mt.count, mt.avgFocus))
+	b.WriteString("\n")
+	b.WriteString(headerStyle.Render("=== Correlation (all-time, paired days) ==="))
+	b.WriteString("\n")
+	if m.correlation.pairedDays < 3 {
+		b.WriteString(dimStyle.Render(fmt.Sprintf("Only %d paired days found. Need at least 3 (ideally 14+).\n", m.correlation.pairedDays)))
+	} else {
+		c := m.correlation
+		b.WriteString(fmt.Sprintf("sleep_hours   <-> focus  %s\n", rLine(c.rHours)))
+		b.WriteString(fmt.Sprintf("sleep_quality <-> focus  %s\n", rLine(c.rQuality)))
+		b.WriteString(fmt.Sprintf("feel          <-> focus  %s\n", rLine(c.rFeel)))
+	}
+	b.WriteString("\n")
+	b.WriteString(headerStyle.Render("=== Focus by block position (all-time) ==="))
+	b.WriteString("\n")
+	if len(m.blockPosStats) == 0 {
+		b.WriteString(dimStyle.Render("No closed blocks yet.\n"))
+	} else {
+		for _, s := range m.blockPosStats {
+			b.WriteString(fmt.Sprintf("#%-3d %-8s %.1f   (%d blocks)\n",
+				s.num, scaledBar(s.avg, 10, 7), s.avg, s.count))
+		}
+		b.WriteString(fmt.Sprintf("\nBest weekday: %-4s avg %.1f\n", m.weekdayBest.day, m.weekdayBest.avg))
+		b.WriteString(fmt.Sprintf("Worst weekday: %-4s avg %.1f\n", m.weekdayWorst.day, m.weekdayWorst.avg))
+	}
+
+	b.WriteString("\n")
+	b.WriteString(headerStyle.Render("=== Focus by start time (all-time) ==="))
+	b.WriteString("\n")
+	anyStartTime := false
+	for _, s := range m.startTimeStats {
+		if s.count > 0 {
+			anyStartTime = true
+			break
+		}
+	}
+	if !anyStartTime {
+		b.WriteString(dimStyle.Render("No closed blocks yet.\n"))
+	} else {
+		for _, s := range m.startTimeStats {
+			if s.count == 0 {
+				b.WriteString(fmt.Sprintf("%s %-8s  -    (0 blocks)\n", s.label, ""))
+				continue
+			}
+			avg := float64(s.sum) / float64(s.count)
+			b.WriteString(fmt.Sprintf("%s %-8s %.1f   (%d blocks)\n", s.label, scaledBar(avg, 10, 7), avg, s.count))
+		}
+	}
+
+	b.WriteString("\n")
+	b.WriteString(headerStyle.Render("=== Focus distribution (all-time) ==="))
+	b.WriteString("\n")
+	if m.focusN == 0 {
+		b.WriteString(dimStyle.Render("No closed blocks yet.\n"))
+	} else {
+		labels := [5]string{" 1-2 ", " 3-4 ", " 5-6 ", " 7-8 ", "9-10 "}
+		maxCount := 0
+		for _, c := range m.focusHist {
+			if c > maxCount {
+				maxCount = c
+			}
+		}
+		for i, c := range m.focusHist {
+			b.WriteString(fmt.Sprintf("%s %-12s %d\n", labels[i], scaledBar(float64(c), float64(maxCount), 12), c))
+		}
+		b.WriteString(fmt.Sprintf("\nmedian: %.0f   mean: %.1f   (%d blocks)\n", m.focusMedian, m.focusMean, m.focusN))
 	}
 	return b.String()
 }
@@ -1911,6 +2105,183 @@ func (m tuiModel) viewConfirmDelete() string {
 	b.WriteString(errStyle.Render(fmt.Sprintf("Delete %s? This cannot be undone.", m.pendingDelete.label)))
 	b.WriteString("\n")
 	return b.String()
+}
+
+type tuiBlockPosStat struct {
+	num   int
+	avg   float64
+	count int
+}
+
+func loadBlockPosStats() ([]tuiBlockPosStat, error) {
+	rows, err := conn.Query(`
+		SELECT block_num, AVG(focus_quality), COUNT(*)
+		FROM blocks WHERE focus_quality IS NOT NULL
+		GROUP BY block_num ORDER BY block_num`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var out []tuiBlockPosStat
+	for rows.Next() {
+		var s tuiBlockPosStat
+		if err := rows.Scan(&s.num, &s.avg, &s.count); err != nil {
+			return nil, err
+		}
+		out = append(out, s)
+	}
+	return out, rows.Err()
+}
+
+type tuiWeekdayStat struct {
+	day string
+	avg float64
+}
+
+func loadWeekdayExtremes() (best, worst tuiWeekdayStat, err error) {
+	rows, err := conn.Query(`
+		SELECT day, AVG(focus_quality)
+		FROM blocks WHERE focus_quality IS NOT NULL
+		GROUP BY day`)
+	if err != nil {
+		return best, worst, err
+	}
+	defer rows.Close()
+
+	first := true
+	for rows.Next() {
+		var s tuiWeekdayStat
+		if err := rows.Scan(&s.day, &s.avg); err != nil {
+			return best, worst, err
+		}
+		if first || s.avg > best.avg {
+			best = s
+		}
+		if first || s.avg < worst.avg {
+			worst = s
+		}
+		first = false
+	}
+	return best, worst, rows.Err()
+}
+
+// loadFocusDistribution buckets all logged focus_quality values into
+// [1-2,3-4,5-6,7-8,9-10] and returns median/mean alongside.
+func loadFocusDistribution() (hist [5]int, median, mean float64, n int, err error) {
+	rows, err := conn.Query(`SELECT focus_quality FROM blocks WHERE focus_quality IS NOT NULL ORDER BY focus_quality`)
+	if err != nil {
+		return hist, 0, 0, 0, err
+	}
+	defer rows.Close()
+
+	var vals []int
+	for rows.Next() {
+		var v int
+		if err := rows.Scan(&v); err != nil {
+			return hist, 0, 0, 0, err
+		}
+		vals = append(vals, v)
+	}
+	if err := rows.Err(); err != nil {
+		return hist, 0, 0, 0, err
+	}
+
+	n = len(vals)
+	if n == 0 {
+		return hist, 0, 0, 0, nil
+	}
+
+	sum := 0
+	for _, v := range vals {
+		hist[(v-1)/2]++ // 1-2->0, 3-4->1, 5-6->2, 7-8->3, 9-10->4
+		sum += v
+	}
+	mean = float64(sum) / float64(n)
+
+	sort.Ints(vals)
+	if n%2 == 1 {
+		median = float64(vals[n/2])
+	} else {
+		median = float64(vals[n/2-1]+vals[n/2]) / 2
+	}
+	return hist, median, mean, n, nil
+}
+
+// scaledBar renders a bar of up to maxWidth chars for value out of max.
+func scaledBar(value, max float64, maxWidth int) string {
+	if max <= 0 {
+		return ""
+	}
+	w := int(math.Round(value / max * float64(maxWidth)))
+	if w > maxWidth {
+		w = maxWidth
+	}
+	if w < 0 {
+		w = 0
+	}
+	return strings.Repeat("■", w)
+}
+
+type tuiStartTimeStat struct {
+	label string
+	sum   int
+	count int
+}
+
+var startTimeBuckets = []struct {
+	label      string
+	start, end int
+}{
+	{"4-8  ", 4, 8},
+	{"8-12 ", 8, 12},
+	{"12-16", 12, 16},
+	{"16-20", 16, 20},
+	{"20-24", 20, 24},
+}
+
+func loadStartTimeStats() ([]tuiStartTimeStat, error) {
+	rows, err := conn.Query(`SELECT created_at, focus_quality FROM blocks WHERE focus_quality IS NOT NULL`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	sums := make([]int, len(startTimeBuckets))
+	counts := make([]int, len(startTimeBuckets))
+
+	for rows.Next() {
+		var createdAt string
+		var focus int
+		if err := rows.Scan(&createdAt, &focus); err != nil {
+			return nil, err
+		}
+		t, perr := time.Parse("2006-01-02 15:04:05", createdAt)
+		if perr != nil {
+			if t2, perr2 := time.Parse(time.RFC3339, createdAt); perr2 == nil {
+				t = t2
+			} else {
+				continue
+			}
+		}
+		hour := t.Hour()
+		for i, bucket := range startTimeBuckets {
+			if hour >= bucket.start && hour < bucket.end {
+				sums[i] += focus
+				counts[i]++
+				break
+			}
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	out := make([]tuiStartTimeStat, len(startTimeBuckets))
+	for i, bucket := range startTimeBuckets {
+		out[i] = tuiStartTimeStat{label: bucket.label, sum: sums[i], count: counts[i]}
+	}
+	return out, nil
 }
 
 func (m tuiModel) viewBlockDetail() string {
