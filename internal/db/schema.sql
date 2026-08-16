@@ -26,7 +26,6 @@ CREATE TABLE IF NOT EXISTS blocks (
 
     outcome         TEXT,
     context_reload  TEXT,
-    first_action    TEXT,
 
     deliverable     TEXT,
     done_notes      TEXT,

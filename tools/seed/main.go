@@ -32,10 +32,6 @@ var contextReloads = []string{
 	"Continuing from this morning's block", "Resuming after a meeting break",
 	"Back from lunch, re-reading notes", "Cold start after a few days off this project",
 }
-var firstActions = []string{
-	"Open editor, re-read last commit", "Write failing test first", "Sketch the schema change",
-	"Re-run the repro steps", "Outline the doc structure", "Pull latest and skim diff",
-}
 var doneNotesPool = []string{
 	"Core logic working, needs polish", "Done, tests passing", "Mostly done, one edge case left",
 	"Got further than expected", "Solid progress, no blockers",
@@ -178,12 +174,12 @@ func main() {
 
 			res, err := conn.Exec(
 				`INSERT INTO blocks
-					(date, block_num, day, project_id, outcome, context_reload, first_action,
+					(date, block_num, day, project_id, outcome, context_reload,
 					 deliverable, done_notes, not_done_notes, next_step, files_links,
 					 focus_quality, tweak, created_at, closed_at)
-				 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+				 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,?, ?)`,
 				dateStr, n, dayAbbr, projID,
-				pick(r, outcomes), pick(r, contextReloads), pick(r, firstActions),
+				pick(r, outcomes), pick(r, contextReloads),
 				"", doneNotes, notDoneNotes, nextStep, pick(r, filesLinksPool),
 				focusVal, tweak, createdAt, closedVal,
 			)

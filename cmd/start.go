@@ -33,7 +33,6 @@ var startCmd = &cobra.Command{
 
 		outcome := askRequired(reader, "Outcome")
 		contextReload := askRequired(reader, "Context reload")
-		firstAction := askRequired(reader, "First action")
 
 		today := time.Now().Format("2006-01-02")
 
@@ -47,7 +46,7 @@ var startCmd = &cobra.Command{
 		}
 
 		res, err := conn.Exec(
-			`INSERT INTO blocks (date, block_num, day, project_id, outcome, context_reload, first_action)
+			`INSERT INTO blocks (date, block_num, day, project_id, outcome, context_reload)
 			 VALUES (?, ?, ?, ?, ?, ?, ?)`,
 			today,
 			nextNum,
@@ -55,7 +54,6 @@ var startCmd = &cobra.Command{
 			projectID,
 			outcome,
 			contextReload,
-			firstAction,
 		)
 		if err != nil {
 			return err

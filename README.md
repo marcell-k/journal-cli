@@ -16,9 +16,9 @@ go build -o journal .
 
 | Command | What it does |
 |---|---|
-| `journal start` | Start a new block. Prompts for project, outcome, context reload, and first action. |
+| `journal start` | Start a new block. Prompts for project, outcome, context reload. |
 | `journal update` | Mid-block check-in on the currently open block. Prompts for done notes, deliverable, files/links — all optional, appends to existing values. |
-| `journal close` | Close the currently open block. Prompts for done, not done, next step (required), files/links and a tweak (optional), and a focus quality rating (1–5). |
+| `journal close` | Close the currently open block. Prompts for done, not done, next step (required), files/links and a tweak (optional), and a focus quality rating (1–10). |
 | `journal block list [--from YYYY-MM-DD] [--to YYYY-MM-DD] [--project name]` | List blocks, optionally filtered by date range or project. Not limited to the current week. |
 | `journal block show <id>` | Show full detail for one block by its id (as printed by `block list` or `start`). |
 

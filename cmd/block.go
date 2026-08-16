@@ -101,7 +101,7 @@ var blockShowCmd = &cobra.Command{
 			return fmt.Errorf("block id must be an integer, got %q", args[0])
 		}
 
-		var date, day, outcome, contextReload, firstAction string
+		var date, day, outcome, contextReload string
 		var project sql.NullString
 		var deliverable, doneNotes, notDoneNotes, nextStep, filesLinks, tweak sql.NullString
 		var focus sql.NullInt64
@@ -110,12 +110,12 @@ var blockShowCmd = &cobra.Command{
 		var blockNum int
 
 		err = conn.QueryRow(`
-			SELECT b.date, b.block_num, b.day, p.name, b.outcome, b.context_reload, b.first_action,
+			SELECT b.date, b.block_num, b.day, p.name, b.outcome, b.context_reload,
 			       b.deliverable, b.done_notes, b.not_done_notes, b.next_step, b.files_links,
 			       b.focus_quality, b.tweak, b.created_at, b.closed_at
 			FROM blocks b LEFT JOIN projects p ON p.id = b.project_id
 			WHERE b.id = ?`, id,
-		).Scan(&date, &blockNum, &day, &project, &outcome, &contextReload, &firstAction,
+		).Scan(&date, &blockNum, &day, &project, &outcome, &contextReload,
 			&deliverable, &doneNotes, &notDoneNotes, &nextStep, &filesLinks,
 			&focus, &tweak, &createdAt, &closedAt)
 		if err == sql.ErrNoRows {
@@ -142,7 +142,6 @@ var blockShowCmd = &cobra.Command{
 		fmt.Printf("%-16s %s\n", "Project:", projName)
 		fmt.Printf("%-16s %s\n", "Outcome:", outcome)
 		fmt.Printf("%-16s %s\n", "Context reload:", contextReload)
-		fmt.Printf("%-16s %s\n", "First action:", firstAction)
 		printField("Deliverable", deliverable)
 		printField("Done", doneNotes)
 		printField("Not done", notDoneNotes)

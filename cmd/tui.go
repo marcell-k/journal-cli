@@ -183,11 +183,11 @@ func (f *form) handleKey(msg tea.KeyMsg) (submitted bool) {
 var (
 	closeFieldLabels       = []string{"Done", "Not done", "Next step", "Files/links", "Focus (1-10)", "Tweak"}
 	blockUpdateFieldLabels = []string{
-		"Outcome", "Context reload", "First action",
-		"Deliverable", "Done notes", "Not done notes",
-		"Next step", "Files/links", "Focus (1-10, blank=-)", "Tweak",
+		"Outcome", "Context reload",
+		"Deliverable", "Done", "Not done",
+		"Files/links",
 	}
-	blockStartFieldLabels    = []string{"Outcome", "Context reload", "First action"}
+	blockStartFieldLabels    = []string{"Outcome", "Context reload"}
 	sleepFieldLabels         = []string{"Day (blank=today)", "Hours", "Quality (1-10)", "Feel (1-10)"}
 	goalAddFieldLabels       = []string{"Goal", "Day (blank=today, or mon/tue/...)"}
 	goalEditFieldLabels      = []string{"Goal"}
@@ -210,7 +210,7 @@ type tuiBlockDetail struct {
 	id, blockNum int
 	date, day    string
 
-	project, outcome, contextReload, firstAction string
+	project, outcome, contextReload string
 
 	deliverable, doneNotes, notDoneNotes string
 	nextStep, filesLinks, tweak          string
@@ -925,12 +925,12 @@ func loadBlockDetail(id int) (tuiBlockDetail, error) {
 	var closedAt sql.NullString
 
 	err := conn.QueryRow(`
-		SELECT b.id, b.date, b.block_num, b.day, p.name, b.outcome, b.context_reload, b.first_action,
+		SELECT b.id, b.date, b.block_num, b.day, p.name, b.outcome, b.context_reload,
 		       b.deliverable, b.done_notes, b.not_done_notes, b.next_step, b.files_links,
 		       b.focus_quality, b.tweak, b.created_at, b.closed_at
 		FROM blocks b LEFT JOIN projects p ON p.id = b.project_id
 		WHERE b.id = ?`, id,
-	).Scan(&d.id, &d.date, &d.blockNum, &d.day, &project, &d.outcome, &d.contextReload, &d.firstAction,
+	).Scan(&d.id, &d.date, &d.blockNum, &d.day, &project, &d.outcome, &d.contextReload,
 		&deliverable, &doneNotes, &notDoneNotes, &nextStep, &filesLinks,
 		&focus, &tweak, &d.createdAt, &closedAt)
 	if err != nil {
@@ -1106,10 +1106,6 @@ func (m tuiModel) updateBrowse(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				m.err = err
 				return m, nil
 			}
-			focusStr := ""
-			if d.focus != nil {
-				focusStr = strconv.Itoa(*d.focus)
-			}
 			// if b.closed {
 			// 	m.status = "That block is already closed."
 			// 	return m, nil
@@ -1117,12 +1113,12 @@ func (m tuiModel) updateBrowse(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.mode = "form"
 			m.formPurpose = "block_update"
 			m.f = newForm(fmt.Sprintf("Updating block #%d", b.blockNum), blockUpdateFieldLabels, []string{
-				valOrEmpty(d.outcome), valOrEmpty(d.contextReload), valOrEmpty(d.firstAction),
+				valOrEmpty(d.outcome), valOrEmpty(d.contextReload),
 				valOrEmpty(d.deliverable), valOrEmpty(d.doneNotes), valOrEmpty(d.notDoneNotes),
-				valOrEmpty(d.nextStep), valOrEmpty(d.filesLinks), focusStr, valOrEmpty(d.tweak),
+				valOrEmpty(d.filesLinks),
 			})
 			m.f.ctxID = b.id
-			m.f.field = 3
+			m.f.field = 2
 		case tabGoals:
 			w := m.currentGoalWeek()
 			if w == nil || m.goalCurDay < 0 || m.goalCurGoal < 0 {
@@ -1362,8 +1358,7 @@ func (m tuiModel) updateBlockDetail(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 func (m tuiModel) submitBlockStart() (tea.Model, tea.Cmd) {
 	outcome := strings.TrimSpace(m.f.values[0])
 	contextReload := strings.TrimSpace(m.f.values[1])
-	firstAction := strings.TrimSpace(m.f.values[2])
-	if outcome == "" || contextReload == "" || firstAction == "" {
+	if outcome == "" || contextReload == "" {
 		m.f.errMsg = "All three fields are required."
 		return m, nil
 	}
@@ -1377,9 +1372,9 @@ func (m tuiModel) submitBlockStart() (tea.Model, tea.Cmd) {
 	}
 
 	_, err := conn.Exec(
-		`INSERT INTO blocks (date, block_num, day, project_id, outcome, context_reload, first_action)
-		 VALUES (?, ?, ?, ?, ?, ?, ?)`,
-		today, nextNum, time.Now().Format("Mon"), m.f.ctxID, outcome, contextReload, firstAction,
+		`INSERT INTO blocks (date, block_num, day, project_id, outcome, context_reload)
+		 VALUES (?, ?, ?, ?, ?, ?)`,
+		today, nextNum, time.Now().Format("Mon"), m.f.ctxID, outcome, contextReload,
 	)
 	if err != nil {
 		m.err = err
@@ -1401,39 +1396,26 @@ func (m tuiModel) submitBlockStart() (tea.Model, tea.Cmd) {
 func (m tuiModel) submitBlockUpdate() (tea.Model, tea.Cmd) {
 	outcome := strings.TrimSpace(m.f.values[0])
 	contextReload := strings.TrimSpace(m.f.values[1])
-	firstAction := strings.TrimSpace(m.f.values[2])
-	deliverable := strings.TrimSpace(m.f.values[3])
-	doneNotes := strings.TrimSpace(m.f.values[4])
-	notDoneNotes := strings.TrimSpace(m.f.values[5])
-	nextStep := strings.TrimSpace(m.f.values[6])
-	filesLinks := strings.TrimSpace(m.f.values[7])
-	focusRaw := strings.TrimSpace(m.f.values[8])
-	tweak := strings.TrimSpace(m.f.values[9])
+	deliverable := strings.TrimSpace(m.f.values[2])
+	doneNotes := strings.TrimSpace(m.f.values[3])
+	notDoneNotes := strings.TrimSpace(m.f.values[4])
+	filesLinks := strings.TrimSpace(m.f.values[6])
 
-	if outcome == "" || contextReload == "" || firstAction == "" {
-		m.f.errMsg = "Outcome, context reload, and first action can't be blank."
+	if outcome == "" || contextReload == "" {
+		m.f.errMsg = "Outcome, context reload can't be blank."
 		return m, nil
-	}
-	var focus interface{}
-	if focusRaw != "" {
-		f, err := strconv.Atoi(focusRaw)
-		if err != nil || f < 1 || f > 10 {
-			m.f.errMsg = "Focus quality must be blank or a number 1-10."
-			return m, nil
-		}
-		focus = f
 	}
 
 	id := m.f.ctxID
 	_, err := conn.Exec(
 		`UPDATE blocks SET
-			outcome = ?, context_reload = ?, first_action = ?,
+			outcome = ?, context_reload = ?, 
 			deliverable = ?, done_notes = ?, not_done_notes = ?,
-			next_step = ?, files_links = ?, focus_quality = ?, tweak = ?
+			files_links = ?
 		 WHERE id = ?`,
-		outcome, contextReload, firstAction,
+		outcome, contextReload,
 		deliverable, doneNotes, notDoneNotes,
-		nextStep, filesLinks, focus, tweak, id,
+		filesLinks, id,
 	)
 
 	if err != nil {
@@ -2399,7 +2381,6 @@ func (m tuiModel) viewBlockDetail() string {
 	row("Project", d.project)
 	row("Outcome", d.outcome)
 	row("Context reload", d.contextReload)
-	row("First action", d.firstAction)
 	row("Deliverable", d.deliverable)
 	row("Done", d.doneNotes)
 	row("Not done", d.notDoneNotes)
