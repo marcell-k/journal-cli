@@ -39,6 +39,35 @@ var (
 	okStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("#87a987"))
 )
 
+// ---------- open-block header info ----------
+
+type openBlockInfo struct {
+	blockNum  int
+	outcome   string
+	project   string
+	startedAt time.Time
+}
+
+var (
+	headerBarStyle = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#c9c9c1")).MarginBottom(1)
+	blockLenMins   = 90
+)
+var displayLoc = func() *time.Location {
+	loc, err := time.LoadLocation("Europe/Berlin")
+	if err != nil {
+		return time.Local
+	}
+	return loc
+}()
+
+type tickMsg time.Time
+
+func tickEvery() tea.Cmd {
+	return tea.Tick(5*time.Second, func(t time.Time) tea.Msg {
+		return tickMsg(t)
+	})
+}
+
 // ---------- data rows ----------
 
 type tuiBlock struct {
@@ -200,6 +229,8 @@ type tuiModel struct {
 	projects   []tuiProject
 	projectCur int
 
+	openBlock *openBlockInfo
+
 	// mode: "browse" | "form" | "start_project" | "block_detail" | "confirm_delete"
 	mode        string
 	formPurpose string
@@ -297,8 +328,45 @@ func (m *tuiModel) reload() error {
 	if m.projectCur < 0 {
 		m.projectCur = 0
 	}
+	openBlock, err := loadOpenBlock()
+	if err != nil {
+		return err
+	}
+	m.openBlock = openBlock
 
 	return nil
+}
+
+func loadOpenBlock() (*openBlockInfo, error) {
+	var ob openBlockInfo
+	var project sql.NullString
+	var createdAt string
+	err := conn.QueryRow(`
+		SELECT b.block_num, b.outcome, p.name, b.created_at
+		FROM blocks b LEFT JOIN projects p ON p.id = b.project_id
+		WHERE b.closed_at IS NULL
+		ORDER BY b.id DESC LIMIT 1`,
+	).Scan(&ob.blockNum, &ob.outcome, &project, &createdAt)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	ob.project = "-"
+	if project.Valid {
+		ob.project = project.String
+	}
+	t, perr := time.ParseInLocation("2006-01-02 15:04:05", createdAt, time.UTC)
+	if perr != nil {
+		if t2, perr2 := time.Parse(time.RFC3339, createdAt); perr2 == nil {
+			t = t2
+		} else {
+			t = time.Now().UTC()
+		}
+	}
+	ob.startedAt = t.In(displayLoc)
+	return &ob, nil
 }
 
 func loadTUIBlocks(weekStart string) ([]tuiBlock, error) {
@@ -660,13 +728,17 @@ func nullOr(v sql.NullString) string {
 
 // ---------- tea.Model ----------
 
-func (m tuiModel) Init() tea.Cmd { return nil }
+func (m tuiModel) Init() tea.Cmd { return tickEvery() }
 
 func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.width, m.height = msg.Width, msg.Height
 		return m, nil
+	case tickMsg:
+		// No-op besides re-scheduling: View() reads time.Now() directly,
+		// so simply causing a re-render every 5s keeps the header live.
+		return m, tickEvery()
 
 	case tea.KeyMsg:
 		m.status = ""
@@ -1380,6 +1452,8 @@ func (m tuiModel) executeDelete() (tea.Model, tea.Cmd) {
 
 func (m tuiModel) View() string {
 	var b strings.Builder
+	b.WriteString(m.headerBar())
+	b.WriteString("\n")
 
 	tabs := make([]string, tabCount)
 	for i, name := range tabNames {
@@ -1428,6 +1502,33 @@ func (m tuiModel) View() string {
 	b.WriteString(dimStyle.Render(m.helpLine()))
 
 	return b.String()
+}
+func (m tuiModel) headerBar() string {
+	now := time.Now().In(displayLoc)
+
+	if m.openBlock == nil {
+		return dimStyle.Render("○ No open block — press n on the Blocks tab to start one")
+	}
+
+	ob := m.openBlock
+	elapsed := now.Sub(ob.startedAt)
+	elapsed = max(elapsed, 0)
+	endsAt := ob.startedAt.Add(time.Duration(blockLenMins) * time.Minute)
+	remaining := endsAt.Sub(now)
+
+	elapsedStr := fmt.Sprintf("%02d:%02d", int(elapsed.Minutes()), int(elapsed.Seconds())%60)
+
+	timerStyle := okStyle
+	statusWord := fmt.Sprintf("ends %s", endsAt.Format("15:04"))
+	if remaining < 0 {
+		timerStyle = errStyle
+		statusWord = fmt.Sprintf("over by %02d:%02d", int(-remaining.Minutes()), int(-remaining.Seconds())%60)
+	}
+
+	status := timerStyle.Render(fmt.Sprintf("● Block #%d open (%s) — %s elapsed, %s — %s",
+		ob.blockNum, ob.project, elapsedStr, statusWord, ob.outcome))
+
+	return status
 }
 
 func (m tuiModel) helpLine() string {
