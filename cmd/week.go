@@ -14,28 +14,7 @@ var weekCmd = &cobra.Command{
 		weekStart := mondayOf(time.Now()).Format("2006-01-02")
 
 		fmt.Println("=== Weekly Goals ===")
-		goalRows, err := conn.Query(
-			`SELECT day, goal, done FROM weekly_goals WHERE week_start = ? ORDER BY id`,
-			weekStart,
-		)
-		if err != nil {
-			return err
-		}
-		defer goalRows.Close()
-
-		for goalRows.Next() {
-			var day, goal string
-			var done bool
-			if err := goalRows.Scan(&day, &goal, &done); err != nil {
-				return err
-			}
-			mark := " "
-			if done {
-				mark = "x"
-			}
-			fmt.Printf("[%s] %-4s %s\n", mark, day, goal)
-		}
-		if err := goalRows.Err(); err != nil {
+		if err := printWeekGoals(conn); err != nil {
 			return err
 		}
 
@@ -47,7 +26,7 @@ var weekCmd = &cobra.Command{
 			 ORDER BY date, block_num`,
 			weekStart,
 		)
-		if err := blockRows.Err(); err != nil {
+		if err != nil {
 			return err
 		}
 		defer blockRows.Close()
@@ -64,6 +43,9 @@ var weekCmd = &cobra.Command{
 				focusStr = fmt.Sprintf("%d", *focus)
 			}
 			fmt.Printf("%s #%d  focus:%s  %s  -> next: %s\n", date, blockNum, focusStr, outcome, nextStep)
+		}
+		if err := blockRows.Err(); err != nil {
+			return err
 		}
 
 		return nil
