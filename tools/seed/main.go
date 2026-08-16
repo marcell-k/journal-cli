@@ -177,7 +177,7 @@ func main() {
 					(date, block_num, day, project_id, outcome, context_reload,
 					 deliverable, done_notes, not_done_notes, next_step, files_links,
 					 focus_quality, tweak, created_at, closed_at)
-				 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,?, ?)`,
+				 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,?, ?, ?, ?)`,
 				dateStr, n, dayAbbr, projID,
 				pick(r, outcomes), pick(r, contextReloads),
 				"", doneNotes, notDoneNotes, nextStep, pick(r, filesLinksPool),

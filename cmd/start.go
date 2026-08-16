@@ -47,7 +47,7 @@ var startCmd = &cobra.Command{
 
 		res, err := conn.Exec(
 			`INSERT INTO blocks (date, block_num, day, project_id, outcome, context_reload)
-			 VALUES (?, ?, ?, ?, ?, ?, ?)`,
+			 VALUES (?, ?, ?, ?, ?, ?)`,
 			today,
 			nextNum,
 			time.Now().Format("Mon"),

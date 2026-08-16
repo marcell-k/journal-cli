@@ -188,8 +188,8 @@ var (
 		"Files/links",
 	}
 	blockStartFieldLabels    = []string{"Outcome", "Context reload"}
-	sleepFieldLabels         = []string{"Day (blank=today)", "Hours", "Quality (1-10)", "Feel (1-10)"}
-	goalAddFieldLabels       = []string{"Goal", "Day (blank=today, or mon/tue/...)"}
+	sleepFieldLabels         = []string{"Day", "Hours", "Quality (1-10)", "Feel (1-10)"}
+	goalAddFieldLabels       = []string{"Goal", "Day"}
 	goalEditFieldLabels      = []string{"Goal"}
 	projectAddFieldLabels    = []string{"Name"}
 	projectRenameFieldLabels = []string{"New name"}
@@ -1399,7 +1399,7 @@ func (m tuiModel) submitBlockUpdate() (tea.Model, tea.Cmd) {
 	deliverable := strings.TrimSpace(m.f.values[2])
 	doneNotes := strings.TrimSpace(m.f.values[3])
 	notDoneNotes := strings.TrimSpace(m.f.values[4])
-	filesLinks := strings.TrimSpace(m.f.values[6])
+	filesLinks := strings.TrimSpace(m.f.values[5])
 
 	if outcome == "" || contextReload == "" {
 		m.f.errMsg = "Outcome, context reload can't be blank."
