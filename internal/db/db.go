@@ -3,6 +3,7 @@ package db
 import (
 	"database/sql"
 	_ "embed"
+	"strings"
 
 	_ "github.com/glebarez/go-sqlite"
 )
@@ -24,5 +25,18 @@ func Open(path string) (*sql.DB, error) {
 		conn.Close()
 		return nil, err
 	}
+	if err := migrate(conn); err != nil {
+		conn.Close()
+		return nil, err
+	}
 	return conn, nil
+}
+
+func migrate(conn *sql.DB) error {
+	if _, err := conn.Exec(`ALTER TABLE daily_checkin ADD COLUMN water_intake REAL`); err != nil {
+		if !strings.Contains(err.Error(), "duplicate column name") {
+			return err
+		}
+	}
+	return nil
 }

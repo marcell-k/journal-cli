@@ -16,6 +16,7 @@ var (
 	sleepQuality int
 	sleepFeel    int
 	sleepDay     string
+	sleepWater   float64
 	sleepNotes   string
 )
 
@@ -58,22 +59,29 @@ var sleepLogCmd = &cobra.Command{
 		} else if feel < 1 || feel > 10 {
 			return fmt.Errorf("--feel must be between 1 and 10, got %d", feel)
 		}
+		water := sleepWater
+		if !cmd.Flags().Changed("water") {
+			water = askFloat(reader, "Water intake (L)", 0, 10)
+		} else if water < 0 || water > 10 {
+			return fmt.Errorf("--water must be between 0 and 10, got %v", water)
+		}
 
 		_, err := conn.Exec(
-			`INSERT INTO daily_checkin (date, sleep_hours, sleep_quality, feel, notes)
-			 VALUES (?, ?, ?, ?, ?)
+			`INSERT INTO daily_checkin (date, sleep_hours, sleep_quality, feel, water_intake, notes)
+			 VALUES (?, ?, ?, ?, ?, ?)
 			 ON CONFLICT(date) DO UPDATE SET
 				sleep_hours = excluded.sleep_hours,
 				sleep_quality = excluded.sleep_quality,
 				feel = excluded.feel,
+				water_intake = excluded.water_intake,
 				notes = CASE WHEN excluded.notes = '' THEN daily_checkin.notes ELSE excluded.notes END`,
-			day, hours, quality, feel, sleepNotes,
+			day, hours, quality, feel, water, sleepNotes,
 		)
 		if err != nil {
 			return err
 		}
 
-		fmt.Printf("Checkin saved for %s: sleep=%.1fh quality=%d feel=%d\n", day, hours, quality, feel)
+		fmt.Printf("Checkin saved for %s: sleep=%.1fh quality=%d feel=%d water=%.1fL\n", day, hours, quality, feel, water)
 		return nil
 	},
 }
@@ -102,6 +110,7 @@ func init() {
 	sleepLogCmd.Flags().Float64Var(&sleepHours, "hours", 0, "hours of sleep")
 	sleepLogCmd.Flags().IntVar(&sleepQuality, "quality", 0, "sleep quality 1-10")
 	sleepLogCmd.Flags().IntVar(&sleepFeel, "feel", 0, "how you feel 1-10")
+	sleepLogCmd.Flags().Float64Var(&sleepWater, "water", 0, "water intake in liters")
 	sleepLogCmd.Flags().StringVar(&sleepDay, "day", "", "day to log for (YYYY-MM-DD), defaults to today")
 	sleepLogCmd.Flags().StringVar(&sleepNotes, "notes", "", "optional notes")
 

@@ -50,7 +50,7 @@ var metricsSleepCmd = &cobra.Command{
 		weekStart := mondayOf(time.Now()).Format("2006-01-02")
 
 		rows, err := conn.Query(
-			`SELECT date, sleep_hours, sleep_quality, feel
+			`SELECT date, sleep_hours, sleep_quality, feel, water_intake
 			 FROM daily_checkin WHERE date >= ? ORDER BY date`,
 			weekStart,
 		)
@@ -60,20 +60,28 @@ var metricsSleepCmd = &cobra.Command{
 		defer rows.Close()
 
 		fmt.Println("=== Daily checkins (this week) ===")
-		var sumHours float64
-		var sumQuality, sumFeel, n int
+		var sumHours, sumWater float64
+		var sumQuality, sumFeel, waterN, n int
 		for rows.Next() {
 			var rawDate string
 			var hours float64
 			var quality, feel int
-			if err := rows.Scan(&rawDate, &hours, &quality, &feel); err != nil {
+			var water sql.NullFloat64
+			if err := rows.Scan(&rawDate, &hours, &quality, &feel, &water); err != nil {
 				return err
 			}
 			displayDate := rawDate
 			if t, err := time.Parse(time.RFC3339, rawDate); err == nil {
 				displayDate = t.Format("2006-01-02")
 			}
-			fmt.Printf("%s  sleep:%.1fh  quality:%d  feel:%d\n", displayDate, hours, quality, feel)
+			waterStr := "-"
+			if water.Valid {
+				waterStr = fmt.Sprintf("%.1fL", water.Float64)
+				sumWater += water.Float64
+				waterN++
+			}
+			fmt.Printf("%s  sleep:%.1fh  quality:%d  feel:%d  water:%s\n", displayDate, hours, quality, feel, waterStr)
+
 			sumHours += hours
 			sumQuality += quality
 			sumFeel += feel
@@ -88,8 +96,13 @@ var metricsSleepCmd = &cobra.Command{
 			return nil
 		}
 
-		fmt.Printf("\nAvg sleep: %.1fh | Avg quality: %.1f | Avg feel: %.1f\n",
-			sumHours/float64(n), float64(sumQuality)/float64(n), float64(sumFeel)/float64(n))
+		avgWaterStr := "-"
+		if waterN > 0 {
+			avgWaterStr = fmt.Sprintf("%.1fL", sumWater/float64(waterN))
+		}
+		fmt.Printf("\nAvg sleep: %.1fh | Avg quality: %.1f | Avg feel: %.1f | Avg water: %s\n",
+			sumHours/float64(n), float64(sumQuality)/float64(n), float64(sumFeel)/float64(n), avgWaterStr)
+
 		return nil
 	},
 }

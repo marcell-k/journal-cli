@@ -27,7 +27,7 @@ const (
 	tabCount
 )
 
-var tabNames = [tabCount]string{"Blocks", "Goals", "Sleep", "Projects", "Metrics"}
+var tabNames = [tabCount]string{"Blocks", "Goals", "Wellness", "Projects", "Metrics"}
 
 // ---------- styles ----------
 
@@ -126,6 +126,8 @@ type tuiSleep struct {
 	weekday       string
 	hours         float64
 	quality, feel int
+	water         float64
+	hasWater      bool
 }
 
 type tuiMetric struct {
@@ -169,11 +171,7 @@ func (f *form) handleKey(msg tea.KeyMsg) (submitted bool) {
 	case "shift+tab", "up":
 		f.field = (f.field - 1 + len(f.labels)) % len(f.labels)
 	case "enter":
-		if f.field < len(f.labels)-1 {
-			f.field++
-		} else {
-			return true
-		}
+		return true
 	default:
 		if msg.Type == tea.KeyRunes || msg.Type == tea.KeySpace {
 			f.values[f.field] += string(msg.Runes)
@@ -190,7 +188,7 @@ var (
 		"Files/links",
 	}
 	blockStartFieldLabels    = []string{"Outcome", "Context reload"}
-	sleepFieldLabels         = []string{"Day", "Hours", "Quality (1-10)", "Feel (1-10)"}
+	sleepFieldLabels         = []string{"Day", "Hours", "Quality (1-10)", "Feel (1-10)", "Water (L)"}
 	goalAddFieldLabels       = []string{"Goal", "Day"}
 	goalEditFieldLabels      = []string{"Goal"}
 	projectAddFieldLabels    = []string{"Name"}
@@ -624,7 +622,7 @@ func loadWeeklyTrend(weekStart string) (tuiWeeklyTrend, error) {
 	}
 
 	sleepRows, err := conn.Query(
-		`SELECT date, sleep_hours FROM daily_checkin WHERE date >= ? AND date <= ?`,
+		`SELECT date, sleep_hours, sleep_quality, feel, water_intake FROM daily_checkin WHERE date >= ? ORDER BY date`,
 		dates[0], dates[6],
 	)
 	if err != nil {
@@ -898,8 +896,14 @@ func loadTUISleep(weekStart string) ([]tuiSleep, error) {
 	for rows.Next() {
 		var s tuiSleep
 		var rawDate string
-		if err := rows.Scan(&rawDate, &s.hours, &s.quality, &s.feel); err != nil {
+		var water sql.NullFloat64
+		if err := rows.Scan(&rawDate, &s.hours, &s.quality, &s.feel, &water); err != nil {
+
 			return nil, err
+		}
+		if water.Valid {
+			s.water = water.Float64
+			s.hasWater = true
 		}
 		day := rawDate
 		if t, err := time.Parse(time.RFC3339, rawDate); err == nil {
@@ -1178,11 +1182,16 @@ func (m tuiModel) updateBrowse(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			s := m.sleep[m.sleepCur]
 			m.mode = "form"
 			m.formPurpose = "sleep_save"
+			waterStr := ""
+			if s.hasWater {
+				waterStr = strconv.FormatFloat(s.water, 'f', -1, 64)
+			}
 			m.f = newForm("Update sleep checkin", sleepFieldLabels, []string{
 				s.date,
 				strconv.FormatFloat(s.hours, 'f', -1, 64),
 				strconv.Itoa(s.quality),
 				strconv.Itoa(s.feel),
+				waterStr,
 			})
 		case tabProjects:
 			if len(m.projects) == 0 {
@@ -1599,6 +1608,7 @@ func (m tuiModel) submitSleepSave() (tea.Model, tea.Cmd) {
 	hoursRaw := strings.TrimSpace(m.f.values[1])
 	qualityRaw := strings.TrimSpace(m.f.values[2])
 	feelRaw := strings.TrimSpace(m.f.values[3])
+	waterRaw := strings.TrimSpace(m.f.values[4])
 
 	day := time.Now().Format("2006-01-02")
 	if dayRaw != "" {
@@ -1624,15 +1634,25 @@ func (m tuiModel) submitSleepSave() (tea.Model, tea.Cmd) {
 		m.f.errMsg = "Feel must be a number 1-10."
 		return m, nil
 	}
+	var water interface{}
+	if waterRaw != "" {
+		w, err := strconv.ParseFloat(waterRaw, 64)
+		if err != nil || w < 0 || w > 10 {
+			m.f.errMsg = "Water must be a number 0-10 (liters)."
+			return m, nil
+		}
+		water = w
+	}
 
 	_, err = conn.Exec(
-		`INSERT INTO daily_checkin (date, sleep_hours, sleep_quality, feel, notes)
-		 VALUES (?, ?, ?, ?, ?)
+		`INSERT INTO daily_checkin (date, sleep_hours, sleep_quality, feel, water_intake, notes)
+		 VALUES (?, ?, ?, ?, ?, ?)
 		 ON CONFLICT(date) DO UPDATE SET
 			sleep_hours = excluded.sleep_hours,
 			sleep_quality = excluded.sleep_quality,
-			feel = excluded.feel`,
-		day, hours, quality, feel, "",
+feel = excluded.feel,
+			water_intake = excluded.water_intake`,
+		day, hours, quality, feel, water, "",
 	)
 	if err != nil {
 		m.err = err
@@ -1798,13 +1818,13 @@ func (m tuiModel) headerBar() string {
 	endsAt := ob.startedAt.Add(time.Duration(blockLenMins) * time.Minute)
 	remaining := endsAt.Sub(now)
 
-	elapsedStr := fmt.Sprintf("%02d:%02d", int(elapsed.Minutes()), int(elapsed.Seconds())%60)
+	elapsedStr := formatDuration(elapsed)
 
 	timerStyle := okStyle
 	statusWord := fmt.Sprintf("ends %s", endsAt.Format("15:04"))
 	if remaining < 0 {
 		timerStyle = errStyle
-		statusWord = fmt.Sprintf("over by %02d:%02d", int(-remaining.Minutes()), int(-remaining.Seconds())%60)
+		statusWord = fmt.Sprintf("over by %s", formatDuration(remaining))
 	}
 
 	status := timerStyle.Render(fmt.Sprintf("● Block #%d open (%s) — %s elapsed, %s — %s",
@@ -2009,7 +2029,7 @@ func (m tuiModel) viewGoals() string {
 
 func (m tuiModel) viewSleep() string {
 	var b strings.Builder
-	b.WriteString(headerStyle.Render("=== Sleep (this week) ==="))
+	b.WriteString(headerStyle.Render("=== Wellness (this week) ==="))
 	b.WriteString("\n")
 
 	if len(m.sleep) == 0 {
@@ -2019,7 +2039,7 @@ func (m tuiModel) viewSleep() string {
 	t := table.New().
 		Border(lipgloss.RoundedBorder()).
 		BorderStyle(tableBorderStyle).
-		Headers("", "Date", "Day", "Sleep", "Quality", "Feel").
+		Headers("", "Date", "Day", "Sleep", "Quality", "Feel", "Water").
 		StyleFunc(func(row, col int) lipgloss.Style {
 			if row == table.HeaderRow {
 				return tableHeaderStyle
@@ -2045,14 +2065,20 @@ func (m tuiModel) viewSleep() string {
 			}
 		})
 
-	var sumHours float64
-	var sumQuality, sumFeel int
+	var sumHours, sumWater float64
+	var sumQuality, sumFeel, waterN int
 	for i, s := range m.sleep {
 		marker := " "
 		if i == m.sleepCur {
 			marker = "▶"
 		}
-		t.Row(marker, s.date, s.weekday, fmt.Sprintf("%.1fh", s.hours), strconv.Itoa(s.quality), strconv.Itoa(s.feel))
+		waterStr := "-"
+		if s.hasWater {
+			waterStr = fmt.Sprintf("%.1fL", s.water)
+			sumWater += s.water
+			waterN++
+		}
+		t.Row(marker, s.date, s.weekday, fmt.Sprintf("%.1fh", s.hours), strconv.Itoa(s.quality), strconv.Itoa(s.feel), waterStr)
 
 		sumHours += s.hours
 		sumQuality += s.quality
@@ -2061,8 +2087,13 @@ func (m tuiModel) viewSleep() string {
 	b.WriteString(t.Render())
 	b.WriteString("\n")
 	n := float64(len(m.sleep))
-	b.WriteString(fmt.Sprintf("\nAvg sleep: %.1fh | Avg quality: %.1f | Avg feel: %.1f\n",
-		sumHours/n, float64(sumQuality)/n, float64(sumFeel)/n))
+	avgWaterStr := "-"
+	if waterN > 0 {
+		avgWaterStr = fmt.Sprintf("%.1fL", sumWater/float64(waterN))
+	}
+	b.WriteString(fmt.Sprintf("\nAvg sleep: %.1fh | Avg quality: %.1f | Avg feel: %.1f | Avg water: %s\n",
+		sumHours/n, float64(sumQuality)/n, float64(sumFeel)/n, avgWaterStr))
+
 	return b.String()
 }
 
