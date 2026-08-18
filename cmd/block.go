@@ -25,7 +25,7 @@ var blockListCmd = &cobra.Command{
 	Short: "List blocks, optionally filtered by date range or project",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		query := `
-			SELECT b.id, b.date, b.block_num, p.name, b.outcome, b.focus_quality, b.closed_at
+			SELECT b.id, b.date, b.block_num, p.name, b.outcome, b.focus_quality, b.created_at, b.closed_at
 			FROM blocks b LEFT JOIN projects p ON p.id = b.project_id
 			WHERE 1=1`
 		var params []interface{}
@@ -62,8 +62,9 @@ var blockListCmd = &cobra.Command{
 			var date, outcome string
 			var project sql.NullString
 			var focus sql.NullInt64
+			var createdAt string
 			var closedAt sql.NullString
-			if err := rows.Scan(&id, &date, &blockNum, &project, &outcome, &focus, &closedAt); err != nil {
+			if err := rows.Scan(&id, &date, &blockNum, &project, &outcome, &focus, &createdAt, &closedAt); err != nil {
 				return err
 			}
 			status := "open"
@@ -78,7 +79,15 @@ var blockListCmd = &cobra.Command{
 			if project.Valid {
 				proj = project.String
 			}
-			fmt.Printf("id=%-4d %s #%-2d [%-6s] proj:%-10s focus:%-2s %s\n", id, date, blockNum, status, proj, focusStr, outcome)
+			lengthStr := "-"
+			if closedAt.Valid {
+				if ct, err1 := parseTimestamp(createdAt); err1 == nil {
+					if ct2, err2 := parseTimestamp(closedAt.String); err2 == nil {
+						lengthStr = formatDuration(ct2.Sub(ct))
+					}
+				}
+			}
+			fmt.Printf("id=%-4d %s #%-2d [%-6s] proj:%-10s len:%-6s focus:%-2s %s\n", id, date, blockNum, status, proj, lengthStr, focusStr, outcome)
 			n++
 		}
 		if err := rows.Err(); err != nil {

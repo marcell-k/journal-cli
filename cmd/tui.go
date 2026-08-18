@@ -88,6 +88,7 @@ type tuiBlock struct {
 	project      string
 	outcome      string
 	focus        *int
+	length       string
 	closed       bool
 }
 
@@ -431,7 +432,7 @@ func loadOpenBlock() (*openBlockInfo, error) {
 
 func loadTUIBlocks(weekStart string) ([]tuiBlock, error) {
 	rows, err := conn.Query(`
-		SELECT b.id, b.date, b.block_num, b.day, p.name, b.outcome, b.focus_quality, b.closed_at
+		SELECT b.id, b.date, b.block_num, b.day, p.name, b.outcome, b.focus_quality, b.created_at, b.closed_at
 		FROM blocks b LEFT JOIN projects p ON p.id = b.project_id
 		WHERE b.date >= ?
 		ORDER BY b.date DESC, b.block_num DESC`, weekStart)
@@ -445,8 +446,9 @@ func loadTUIBlocks(weekStart string) ([]tuiBlock, error) {
 		var b tuiBlock
 		var project *string
 		var focus *int
+		var createdAt string
 		var closedAt *string
-		if err := rows.Scan(&b.id, &b.date, &b.blockNum, &b.day, &project, &b.outcome, &focus, &closedAt); err != nil {
+		if err := rows.Scan(&b.id, &b.date, &b.blockNum, &b.day, &project, &b.outcome, &focus, &createdAt, &closedAt); err != nil {
 			return nil, err
 		}
 		if project != nil {
@@ -456,6 +458,16 @@ func loadTUIBlocks(weekStart string) ([]tuiBlock, error) {
 		}
 		b.focus = focus
 		b.closed = closedAt != nil
+		b.length = "-"
+		if ct, err := parseTimestamp(createdAt); err == nil {
+			if closedAt != nil {
+				if ct2, err2 := parseTimestamp(*closedAt); err2 == nil {
+					b.length = formatDuration(ct2.Sub(ct))
+				}
+			} else {
+				b.length = formatDuration(time.Now().Sub(ct))
+			}
+		}
 		out = append(out, b)
 	}
 	return out, rows.Err()
@@ -1863,7 +1875,7 @@ func (m tuiModel) viewBlocks() string {
 	t := table.New().
 		Border(lipgloss.RoundedBorder()).
 		BorderStyle(tableBorderStyle).
-		Headers("#", "Date", "Status", "Project", "Focus", "Outcome").
+		Headers("#", "Date", "Status", "Project", "Length", "Focus", "Outcome").
 		StyleFunc(func(row, col int) lipgloss.Style {
 			if row == table.HeaderRow {
 				return tableHeaderStyle
@@ -1880,7 +1892,7 @@ func (m tuiModel) viewBlocks() string {
 					status = "OPEN"
 				}
 				return statusStyle(status).Padding(0, 1)
-			case 4: // Focus
+			case 5: // Focus
 				if selected {
 					return rowSelectedStyle.Align(lipgloss.Right)
 				}
@@ -1910,7 +1922,7 @@ func (m tuiModel) viewBlocks() string {
 		if blk.focus != nil {
 			focus = strconv.Itoa(*blk.focus)
 		}
-		t.Row(idStr, dateOnly(blk.date), truncate(status, clampColWidth), truncate(blk.project, clampColWidth), truncate(focus, clampColWidth), truncate(blk.outcome, outcomeColWidth))
+		t.Row(idStr, dateOnly(blk.date), truncate(status, clampColWidth), truncate(blk.project, clampColWidth), truncate(blk.length, clampColWidth), truncate(focus, clampColWidth), truncate(blk.outcome, outcomeColWidth))
 	}
 
 	b.WriteString(t.Render())
