@@ -168,6 +168,8 @@ func (f *form) handleKey(msg tea.KeyMsg) (submitted bool) {
 		}
 	case "tab", "down":
 		f.field = (f.field + 1) % len(f.labels)
+	case "alt+backspace":
+		f.values[f.field] = deleteLastWord(f.values[f.field])
 	case "shift+tab", "up":
 		f.field = (f.field - 1 + len(f.labels)) % len(f.labels)
 	case "ctrl+j":
@@ -180,6 +182,13 @@ func (f *form) handleKey(msg tea.KeyMsg) (submitted bool) {
 		}
 	}
 	return false
+}
+func deleteLastWord(s string) string {
+	s = strings.TrimRight(s, " ")
+	if i := strings.LastIndexByte(s, ' '); i >= 0 {
+		return s[:i+1]
+	}
+	return ""
 }
 
 var (
