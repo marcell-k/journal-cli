@@ -39,6 +39,9 @@ CREATE TABLE IF NOT EXISTS blocks (
     created_at      TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     closed_at       TIMESTAMP
 );
+CREATE UNIQUE INDEX IF NOT EXISTS idx_blocks_one_open
+    ON blocks(closed_at) WHERE closed_at IS NULL;
+
 
 CREATE INDEX IF NOT EXISTS idx_blocks_date ON blocks(date);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_blocks_date_num ON blocks(date, block_num);

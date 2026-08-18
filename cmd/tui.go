@@ -170,6 +170,8 @@ func (f *form) handleKey(msg tea.KeyMsg) (submitted bool) {
 		f.field = (f.field + 1) % len(f.labels)
 	case "shift+tab", "up":
 		f.field = (f.field - 1 + len(f.labels)) % len(f.labels)
+	case "ctrl+j":
+		f.values[f.field] += "\n"
 	case "enter":
 		return true
 	default:
@@ -182,6 +184,7 @@ func (f *form) handleKey(msg tea.KeyMsg) (submitted bool) {
 
 var (
 	closeFieldLabels       = []string{"Done", "Not done", "Next step", "Files/links", "Focus (1-10)", "Tweak"}
+	appendNoteFieldLabels  = []string{"Note"}
 	blockUpdateFieldLabels = []string{
 		"Outcome", "Context reload",
 		"Deliverable", "Done", "Not done",
@@ -622,7 +625,7 @@ func loadWeeklyTrend(weekStart string) (tuiWeeklyTrend, error) {
 	}
 
 	sleepRows, err := conn.Query(
-		`SELECT date, sleep_hours, sleep_quality, feel, water_intake FROM daily_checkin WHERE date >= ? ORDER BY date`,
+		`SELECT date, sleep_hours, sleep_quality, feel, water_intake FROM daily_checkin WHERE date >= ? AND date <= ? ORDER BY date`,
 		dates[0], dates[6],
 	)
 	if err != nil {
@@ -631,7 +634,9 @@ func loadWeeklyTrend(weekStart string) (tuiWeeklyTrend, error) {
 	for sleepRows.Next() {
 		var rawDate string
 		var hours float64
-		if err := sleepRows.Scan(&rawDate, &hours); err != nil {
+		var quality, feel int
+		var water sql.NullFloat64
+		if err := sleepRows.Scan(&rawDate, &hours, &quality, &feel, &water); err != nil {
 			sleepRows.Close()
 			return t, err
 		}
@@ -884,7 +889,7 @@ func (m *tuiModel) goalAdvanceWeek() {
 
 func loadTUISleep(weekStart string) ([]tuiSleep, error) {
 	rows, err := conn.Query(
-		`SELECT date, sleep_hours, sleep_quality, feel FROM daily_checkin WHERE date >= ? ORDER BY date`,
+		`SELECT date, sleep_hours, sleep_quality, feel, water_intake FROM daily_checkin WHERE date >= ? ORDER BY date`,
 		weekStart,
 	)
 	if err != nil {
@@ -1206,6 +1211,16 @@ func (m tuiModel) updateBrowse(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
+	case "a":
+		if m.tab == tabBlocks && len(m.blocks) > 0 {
+			b := m.blocks[m.blockCur]
+			m.mode = "form"
+			m.formPurpose = "block_append_note"
+			m.f = newForm(fmt.Sprintf("Append note — block #%d", b.blockNum), appendNoteFieldLabels, nil)
+			m.f.ctxID = b.id
+		}
+		return m, nil
+
 	// d: delete — same key, same meaning, on every tab. Always confirms first.
 	case "d":
 		switch m.tab {
@@ -1335,6 +1350,8 @@ func (m tuiModel) submitForm() (tea.Model, tea.Cmd) {
 		return m.submitBlockStart()
 	case "block_update":
 		return m.submitBlockUpdate()
+	case "block_append_note":
+		return m.submitBlockAppendNote()
 	case "block_close":
 		return m.submitBlockClose()
 	case "goal_add":
@@ -1408,8 +1425,12 @@ func (m tuiModel) updateBlockDetail(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 func (m tuiModel) submitBlockStart() (tea.Model, tea.Cmd) {
 	outcome := strings.TrimSpace(m.f.values[0])
 	contextReload := strings.TrimSpace(m.f.values[1])
-	if outcome == "" || contextReload == "" {
-		m.f.errMsg = "All three fields are required."
+	if outcome == "" {
+		m.f.errMsg = "Fields are required."
+		return m, nil
+	}
+	if m.openBlock != nil {
+		m.f.errMsg = "A block is already open — close it first."
 		return m, nil
 	}
 
@@ -2004,7 +2025,9 @@ func (m tuiModel) viewGoals() string {
 			if wi == 0 && di == todayIdx {
 				label = okStyle.Render(day.name + " (today)")
 			}
-			b.WriteString(dayMarker + label + "\n")
+			b.WriteString(dayMarker)
+			b.WriteString(label)
+			b.WriteString("\n")
 
 			if len(day.goals) == 0 {
 				b.WriteString("        " + dimStyle.Render("(no goals)") + "\n")
@@ -2264,7 +2287,8 @@ func (m tuiModel) viewForm() string {
 		if i == m.f.field {
 			marker = cursorStyle.Render("> ")
 		}
-		b.WriteString(fmt.Sprintf("%s%-*s %s\n", marker, labelWidth+1, label+":", m.f.values[i]))
+		val := strings.ReplaceAll(m.f.values[i], "\n", dimStyle.Render("")+"\n"+strings.Repeat(" ", labelWidth+3))
+		b.WriteString(fmt.Sprintf("%s%-*s %s\n", marker, labelWidth+1, label+":", val))
 	}
 	if m.f.errMsg != "" {
 		b.WriteString("\n")
@@ -2399,6 +2423,34 @@ func loadFocusDistribution() (hist [5]int, median, mean float64, n int, err erro
 		median = float64(vals[n/2-1]+vals[n/2]) / 2
 	}
 	return hist, median, mean, n, nil
+}
+
+func (m tuiModel) submitBlockAppendNote() (tea.Model, tea.Cmd) {
+	note := strings.TrimSpace(m.f.values[0])
+	if note == "" {
+		m.f.errMsg = "Note can't be blank."
+		return m, nil
+	}
+	_, err := conn.Exec(
+		`UPDATE blocks SET done_notes = CASE
+			WHEN done_notes IS NULL OR done_notes = '' THEN ?
+			ELSE done_notes || ' | ' || ?
+		 END WHERE id = ?`,
+		note, note, m.f.ctxID,
+	)
+	if err != nil {
+		m.err = err
+		m.mode = "browse"
+		return m, nil
+	}
+	m.mode = "browse"
+	m.status = "Note appended."
+	if rerr := m.reload(); rerr != nil {
+		m.err = rerr
+	} else {
+		m.err = nil
+	}
+	return m, nil
 }
 
 // scaledBar renders a bar of up to maxWidth chars for value out of max.
