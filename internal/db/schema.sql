@@ -33,7 +33,7 @@ CREATE TABLE IF NOT EXISTS blocks (
     next_step       TEXT,
     files_links     TEXT,
 
-    focus_quality   INTEGER CHECK (focus_quality BETWEEN 1 AND 10),
+    focus_quality REAL CHECK (focus_quality BETWEEN 1 AND 10),
     tweak           TEXT,
 
     created_at      TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,

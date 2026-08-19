@@ -475,7 +475,7 @@ func loadTUIBlocks(weekStart string) ([]tuiBlock, error) {
 					b.length = formatDuration(ct2.Sub(ct))
 				}
 			} else {
-				b.length = formatDuration(time.Now().Sub(ct))
+				b.length = formatDuration(time.Since(ct))
 			}
 		}
 		out = append(out, b)
@@ -486,7 +486,7 @@ func loadTUIBlocks(weekStart string) ([]tuiBlock, error) {
 func weekDates(weekStart string) [7]string {
 	var out [7]string
 	t, _ := time.Parse("2006-01-02", weekStart)
-	for i := 0; i < 7; i++ {
+	for i := range 7 {
 		out[i] = t.AddDate(0, 0, i).Format("2006-01-02")
 	}
 	return out
@@ -711,8 +711,8 @@ func toPlotSeries(values [7]float64, has [7]bool) []float64 {
 
 func weekDayAxis(graph string) string {
 	firstLine := graph
-	if i := strings.IndexByte(graph, '\n'); i >= 0 {
-		firstLine = graph[:i]
+	if first, _, ok := strings.Cut(graph, "\n"); ok {
+		firstLine = first
 	}
 	margin := strings.IndexRune(firstLine, '┤')
 	if margin < 0 {
@@ -741,9 +741,7 @@ const completionBarWidth = 5
 
 func completionBar(done, total int) string {
 	filled := int(math.Round(float64(done) / float64(total) * float64(completionBarWidth)))
-	if filled > completionBarWidth {
-		filled = completionBarWidth
-	}
+	filled = min(filled, completionBarWidth)
 	bar := strings.Repeat("■", filled) + strings.Repeat(".", completionBarWidth-filled)
 
 	return fmt.Sprintf("%s %d/%d done", bar, done, total)
@@ -767,7 +765,7 @@ func loadGoalWeeks(currentWeekStart string, count int) ([]goalsWeek, error) {
 	}
 	var out []goalsWeek
 	t, _ := time.Parse("2006-01-02", currentWeekStart)
-	for i := 0; i < count; i++ {
+	for i := range count {
 		ws := t.AddDate(0, 0, -7*i).Format("2006-01-02")
 		w, err := loadGoalWeek(ws, weekNumFor(ws, firstStart))
 		if err != nil {
@@ -1522,7 +1520,7 @@ func (m tuiModel) submitBlockClose() (tea.Model, tea.Cmd) {
 	focusRaw := strings.TrimSpace(m.f.values[4])
 	tweak := strings.TrimSpace(m.f.values[5])
 
-	focus, err := strconv.Atoi(focusRaw)
+	focus, err := strconv.ParseFloat(focusRaw, 64)
 	if err != nil || focus < 1 || focus > 10 {
 		m.f.errMsg = "Focus quality must be a number 1-10."
 		return m, nil
@@ -1664,7 +1662,7 @@ func (m tuiModel) submitSleepSave() (tea.Model, tea.Cmd) {
 		m.f.errMsg = "Feel must be a number 1-10."
 		return m, nil
 	}
-	var water interface{}
+	var water any
 	if waterRaw != "" {
 		w, err := strconv.ParseFloat(waterRaw, 64)
 		if err != nil || w < 0 || w > 10 {
@@ -2013,8 +2011,8 @@ func (m tuiModel) viewGoals() string {
 			marker = cursorStyle.Render("> ")
 		}
 		done, total := weekGoalStats(w)
-		b.WriteString(fmt.Sprintf("%s%s Week %s – %s  #%d   %s\n",
-			marker, arrow, w.weekStart, w.weekEnd, w.num, completionBar(done, total)))
+		fmt.Fprintf(&b, "%s%s Week %s – %s  #%d   %s\n",
+			marker, arrow, w.weekStart, w.weekEnd, w.num, completionBar(done, total))
 
 		if wi != m.goalWeekExpanded {
 			continue
@@ -2039,7 +2037,9 @@ func (m tuiModel) viewGoals() string {
 			b.WriteString("\n")
 
 			if len(day.goals) == 0 {
-				b.WriteString("        " + dimStyle.Render("(no goals)") + "\n")
+				b.WriteString("        ")
+				b.WriteString(dimStyle.Render("(no goals)"))
+				b.WriteString("\n")
 				continue
 			}
 			for gi, g := range day.goals {
@@ -2051,7 +2051,7 @@ func (m tuiModel) viewGoals() string {
 				if wi == m.goalCurWeek && m.goalCurDay == di && m.goalCurGoal == gi {
 					goalMarker = cursorStyle.Render("    > ")
 				}
-				b.WriteString(fmt.Sprintf("%s[%s] %s\n", goalMarker, mark, g.goal))
+				fmt.Fprintf(&b, "%s[%s] %s\n", goalMarker, mark, g.goal)
 			}
 		}
 		b.WriteString("\n")
@@ -2123,8 +2123,8 @@ func (m tuiModel) viewSleep() string {
 	if waterN > 0 {
 		avgWaterStr = fmt.Sprintf("%.1fL", sumWater/float64(waterN))
 	}
-	b.WriteString(fmt.Sprintf("\nAvg sleep: %.1fh | Avg quality: %.1f | Avg feel: %.1f | Avg water: %s\n",
-		sumHours/n, float64(sumQuality)/n, float64(sumFeel)/n, avgWaterStr))
+	fmt.Fprintf(&b, "\nAvg sleep: %.1fh | Avg quality: %.1f | Avg feel: %.1f | Avg water: %s\n",
+		sumHours/n, float64(sumQuality)/n, float64(sumFeel)/n, avgWaterStr)
 
 	return b.String()
 }
@@ -2187,7 +2187,7 @@ func (m tuiModel) viewMetrics() string {
 		b.WriteString(dimStyle.Render("No blocks logged this week."))
 	} else {
 		for _, mt := range m.metrics {
-			b.WriteString(fmt.Sprintf("  %-15s blocks:%-3d avg focus:%.1f\n", mt.project, mt.count, mt.avgFocus))
+			fmt.Fprintf(&b, "  %-15s blocks:%-3d avg focus:%.1f\n", mt.project, mt.count, mt.avgFocus)
 		}
 	}
 
@@ -2227,11 +2227,11 @@ func (m tuiModel) viewMetrics() string {
 		b.WriteString(dimStyle.Render("No closed blocks yet.\n"))
 	} else {
 		for _, s := range m.blockPosStats {
-			b.WriteString(fmt.Sprintf("#%-3d %-8s %.1f   (%d blocks)\n",
-				s.num, scaledBar(s.avg, 10, 7), s.avg, s.count))
+			fmt.Fprintf(&b, "#%-3d %-8s %.1f   (%d blocks)\n",
+				s.num, scaledBar(s.avg, 10, 7), s.avg, s.count)
 		}
-		b.WriteString(fmt.Sprintf("\nBest weekday: %-4s avg %.1f\n", m.weekdayBest.day, m.weekdayBest.avg))
-		b.WriteString(fmt.Sprintf("Worst weekday: %-4s avg %.1f\n", m.weekdayWorst.day, m.weekdayWorst.avg))
+		fmt.Fprintf(&b, "\nBest weekday: %-4s avg %.1f\n", m.weekdayBest.day, m.weekdayBest.avg)
+		fmt.Fprintf(&b, "Worst weekday: %-4s avg %.1f\n", m.weekdayWorst.day, m.weekdayWorst.avg)
 	}
 
 	b.WriteString(headerStyle.Render("=== Focus by start time (all-time) ==="))
@@ -2248,11 +2248,11 @@ func (m tuiModel) viewMetrics() string {
 	} else {
 		for _, s := range m.startTimeStats {
 			if s.count == 0 {
-				b.WriteString(fmt.Sprintf("%s %-8s  -    (0 blocks)\n", s.label, ""))
+				fmt.Fprintf(&b, "%s %-8s  -    (0 blocks)\n", s.label, "")
 				continue
 			}
 			avg := float64(s.sum) / float64(s.count)
-			b.WriteString(fmt.Sprintf("%s %-8s %.1f   (%d blocks)\n", s.label, scaledBar(avg, 10, 7), avg, s.count))
+			fmt.Fprintf(&b, "%s %-8s %.1f   (%d blocks)\n", s.label, scaledBar(avg, 10, 7), avg, s.count)
 		}
 	}
 
@@ -2270,9 +2270,9 @@ func (m tuiModel) viewMetrics() string {
 			}
 		}
 		for i, c := range m.focusHist {
-			b.WriteString(fmt.Sprintf("%s %-12s %d\n", labels[i], scaledBar(float64(c), float64(maxCount), 12), c))
+			fmt.Fprintf(&b, "%s %-12s %d\n", labels[i], scaledBar(float64(c), float64(maxCount), 12), c)
 		}
-		b.WriteString(fmt.Sprintf("\nmedian: %.0f   mean: %.1f   (%d blocks)\n", m.focusMedian, m.focusMean, m.focusN))
+		fmt.Fprintf(&b, "\nmedian: %.0f   mean: %.1f   (%d blocks)\n", m.focusMedian, m.focusMean, m.focusN)
 	}
 	return b.String()
 }
@@ -2297,7 +2297,7 @@ func (m tuiModel) viewForm() string {
 			marker = cursorStyle.Render("> ")
 		}
 		val := strings.ReplaceAll(m.f.values[i], "\n", dimStyle.Render("")+"\n"+strings.Repeat(" ", labelWidth+3))
-		b.WriteString(fmt.Sprintf("%s%-*s %s\n", marker, labelWidth+1, label+":", val))
+		fmt.Fprintf(&b, "%s%-*s %s\n", marker, labelWidth+1, label+":", val)
 	}
 	if m.f.errMsg != "" {
 		b.WriteString("\n")
@@ -2544,7 +2544,7 @@ func (m tuiModel) viewBlockDetail() string {
 	b.WriteString("\n")
 
 	row := func(label, val string) {
-		b.WriteString(fmt.Sprintf("%-16s %s\n", label+":", val))
+		fmt.Fprintf(&b, "%-16s %s\n", label+":", val)
 	}
 
 	row("Project", d.project)
