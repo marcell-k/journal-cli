@@ -49,8 +49,8 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_blocks_date_num ON blocks(date, block_num)
 CREATE TABLE IF NOT EXISTS daily_checkin (
     date          DATE PRIMARY KEY,
     sleep_hours   REAL,
-    sleep_quality INTEGER CHECK (sleep_quality BETWEEN 1 AND 10),
-    feel          INTEGER CHECK (feel BETWEEN 1 AND 10),
+    sleep_quality REAL CHECK (sleep_quality BETWEEN 1 AND 10),
+    feel          REAL CHECK (feel BETWEEN 1 AND 10),
     water_intake  REAL,
     notes         TEXT,
     created_at    TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP

@@ -28,7 +28,7 @@ var blockListCmd = &cobra.Command{
 			SELECT b.id, b.date, b.block_num, p.name, b.outcome, b.focus_quality, b.created_at, b.closed_at
 			FROM blocks b LEFT JOIN projects p ON p.id = b.project_id
 			WHERE 1=1`
-		var params []interface{}
+		var params []any
 
 		if blockFrom != "" {
 			if _, err := time.Parse("2006-01-02", blockFrom); err != nil {
@@ -61,7 +61,7 @@ var blockListCmd = &cobra.Command{
 			var id, blockNum int
 			var date, outcome string
 			var project sql.NullString
-			var focus sql.NullInt64
+			var focus sql.NullFloat64
 			var createdAt string
 			var closedAt sql.NullString
 			if err := rows.Scan(&id, &date, &blockNum, &project, &outcome, &focus, &createdAt, &closedAt); err != nil {
@@ -73,7 +73,7 @@ var blockListCmd = &cobra.Command{
 			}
 			focusStr := "-"
 			if focus.Valid {
-				focusStr = strconv.FormatInt(focus.Int64, 10)
+				focusStr = strconv.FormatFloat(focus.Float64, 'f', 1, 64)
 			}
 			proj := "-"
 			if project.Valid {
@@ -113,7 +113,7 @@ var blockShowCmd = &cobra.Command{
 		var date, day, outcome, contextReload string
 		var project sql.NullString
 		var deliverable, doneNotes, notDoneNotes, nextStep, filesLinks, tweak sql.NullString
-		var focus sql.NullInt64
+		var focus sql.NullFloat64
 		var createdAt string
 		var closedAt sql.NullString
 		var blockNum int
@@ -158,7 +158,7 @@ var blockShowCmd = &cobra.Command{
 		printField("Files/links", filesLinks)
 		focusStr := "-"
 		if focus.Valid {
-			focusStr = strconv.FormatInt(focus.Int64, 10)
+			focusStr = strconv.FormatFloat(focus.Float64, 'f', 1, 64)
 		}
 		fmt.Printf("%-16s %s\n", "Focus quality:", focusStr)
 		printField("Tweak", tweak)

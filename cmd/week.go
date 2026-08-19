@@ -34,13 +34,13 @@ var weekCmd = &cobra.Command{
 		for blockRows.Next() {
 			var date, outcome, nextStep string
 			var blockNum int
-			var focus *int
+			var focus *float64
 			if err := blockRows.Scan(&date, &blockNum, &outcome, &focus, &nextStep); err != nil {
 				return err
 			}
 			focusStr := "-"
 			if focus != nil {
-				focusStr = fmt.Sprintf("%d", *focus)
+				focusStr = fmt.Sprintf("%.1f", *focus)
 			}
 			fmt.Printf("%s #%d  focus:%s  %s  -> next: %s\n", date, blockNum, focusStr, outcome, nextStep)
 		}

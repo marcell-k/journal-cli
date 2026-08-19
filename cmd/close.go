@@ -32,7 +32,7 @@ var closeCmd = &cobra.Command{
 		notDone := askRequired(reader, "Not done")
 		nextStep := askRequired(reader, "Exact next step to start with")
 		filesLinks := askOptional(reader, "Files/links")
-		focus := askInt(reader, "Focus quality", 1, 10)
+		focus := askFloat(reader, "Focus quality", 1, 10)
 		tweak := askOptional(reader, "One tweak for next block")
 
 		tx, err := conn.Begin()

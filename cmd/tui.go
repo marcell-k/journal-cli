@@ -87,7 +87,7 @@ type tuiBlock struct {
 	date, day    string
 	project      string
 	outcome      string
-	focus        *int
+	focus        *float64
 	length       string
 	closed       bool
 }
@@ -125,7 +125,7 @@ type tuiSleep struct {
 	date          string
 	weekday       string
 	hours         float64
-	quality, feel int
+	quality, feel float64
 	water         float64
 	hasWater      bool
 }
@@ -227,7 +227,7 @@ type tuiBlockDetail struct {
 	deliverable, doneNotes, notDoneNotes string
 	nextStep, filesLinks, tweak          string
 
-	focus *int
+	focus *float64
 
 	createdAt string
 	closedAt  *string
@@ -455,7 +455,7 @@ func loadTUIBlocks(weekStart string) ([]tuiBlock, error) {
 	for rows.Next() {
 		var b tuiBlock
 		var project *string
-		var focus *int
+		var focus *float64
 		var createdAt string
 		var closedAt *string
 		if err := rows.Scan(&b.id, &b.date, &b.blockNum, &b.day, &project, &b.outcome, &focus, &createdAt, &closedAt); err != nil {
@@ -569,13 +569,13 @@ func loadTUICorrelation() (tuiCorrelation, error) {
 	var hours, quality, feel, focus []float64
 	for rows.Next() {
 		var h, avgFocus float64
-		var q, f int
+		var q, f float64
 		if err := rows.Scan(&h, &q, &f, &avgFocus); err != nil {
 			return tuiCorrelation{}, err
 		}
 		hours = append(hours, h)
-		quality = append(quality, float64(q))
-		feel = append(feel, float64(f))
+		quality = append(quality, q)
+		feel = append(feel, f)
 		focus = append(focus, avgFocus)
 	}
 	if err := rows.Err(); err != nil {
@@ -643,7 +643,7 @@ func loadWeeklyTrend(weekStart string) (tuiWeeklyTrend, error) {
 	for sleepRows.Next() {
 		var rawDate string
 		var hours float64
-		var quality, feel int
+		var quality, feel float64
 		var water sql.NullFloat64
 		if err := sleepRows.Scan(&rawDate, &hours, &quality, &feel, &water); err != nil {
 			sleepRows.Close()
@@ -978,7 +978,7 @@ func loadBlockDetail(id int) (tuiBlockDetail, error) {
 	var d tuiBlockDetail
 	var project sql.NullString
 	var deliverable, doneNotes, notDoneNotes, nextStep, filesLinks, tweak sql.NullString
-	var focus sql.NullInt64
+	var focus sql.NullFloat64
 	var closedAt sql.NullString
 
 	err := conn.QueryRow(`
@@ -1005,7 +1005,7 @@ func loadBlockDetail(id int) (tuiBlockDetail, error) {
 	d.filesLinks = nullOr(filesLinks)
 	d.tweak = nullOr(tweak)
 	if focus.Valid {
-		f := int(focus.Int64)
+		f := focus.Float64
 		d.focus = &f
 	}
 	if closedAt.Valid {
@@ -1200,8 +1200,8 @@ func (m tuiModel) updateBrowse(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			}
 			m.f = newForm("Update sleep checkin", sleepFieldLabels, []string{
 				strconv.FormatFloat(s.hours, 'f', -1, 64),
-				strconv.Itoa(s.quality),
-				strconv.Itoa(s.feel),
+				strconv.FormatFloat(s.quality, 'f', -1, 64),
+				strconv.FormatFloat(s.feel, 'f', -1, 64),
 				waterStr,
 				s.date,
 			})
@@ -1652,12 +1652,12 @@ func (m tuiModel) submitSleepSave() (tea.Model, tea.Cmd) {
 		m.f.errMsg = "Hours must be a number 0-24."
 		return m, nil
 	}
-	quality, err := strconv.Atoi(qualityRaw)
+	quality, err := strconv.ParseFloat(qualityRaw, 64)
 	if err != nil || quality < 1 || quality > 10 {
 		m.f.errMsg = "Quality must be a number 1-10."
 		return m, nil
 	}
-	feel, err := strconv.Atoi(feelRaw)
+	feel, err := strconv.ParseFloat(feelRaw, 64)
 	if err != nil || feel < 1 || feel > 10 {
 		m.f.errMsg = "Feel must be a number 1-10."
 		return m, nil
@@ -1886,7 +1886,7 @@ func (m tuiModel) helpLine() string {
 	}
 }
 
-func focusStyle(n int) lipgloss.Style {
+func focusStyle(n float64) lipgloss.Style {
 	switch {
 	case n <= 0:
 		return tableCellStyle
@@ -1968,7 +1968,7 @@ func (m tuiModel) viewBlocks() string {
 		}
 		focus := "-"
 		if blk.focus != nil {
-			focus = strconv.Itoa(*blk.focus)
+			focus = strconv.FormatFloat(*blk.focus, 'f', 1, 64)
 		}
 		t.Row(idStr, dateOnly(blk.date), truncate(status, clampColWidth), truncate(blk.project, clampColWidth), truncate(blk.length, clampColWidth), truncate(focus, clampColWidth), truncate(blk.outcome, outcomeColWidth))
 	}
@@ -2098,7 +2098,8 @@ func (m tuiModel) viewSleep() string {
 		})
 
 	var sumHours, sumWater float64
-	var sumQuality, sumFeel, waterN int
+	var sumQuality, sumFeel float64
+	var waterN int
 	for i, s := range m.sleep {
 		marker := " "
 		if i == m.sleepCur {
@@ -2110,7 +2111,7 @@ func (m tuiModel) viewSleep() string {
 			sumWater += s.water
 			waterN++
 		}
-		t.Row(marker, s.date, fmt.Sprintf("%.1fh", s.hours), strconv.Itoa(s.quality), strconv.Itoa(s.feel), waterStr, s.weekday)
+		t.Row(marker, s.date, fmt.Sprintf("%.1fh", s.hours), strconv.FormatFloat(s.quality, 'f', 1, 64), strconv.FormatFloat(s.feel, 'f', 1, 64), waterStr, s.weekday)
 
 		sumHours += s.hours
 		sumQuality += s.quality
@@ -2124,7 +2125,7 @@ func (m tuiModel) viewSleep() string {
 		avgWaterStr = fmt.Sprintf("%.1fL", sumWater/float64(waterN))
 	}
 	fmt.Fprintf(&b, "\nAvg sleep: %.1fh | Avg quality: %.1f | Avg feel: %.1f | Avg water: %s\n",
-		sumHours/n, float64(sumQuality)/n, float64(sumFeel)/n, avgWaterStr)
+		sumHours/n, sumQuality/n, sumFeel/n, avgWaterStr)
 
 	return b.String()
 }
@@ -2251,7 +2252,7 @@ func (m tuiModel) viewMetrics() string {
 				fmt.Fprintf(&b, "%s %-8s  -    (0 blocks)\n", s.label, "")
 				continue
 			}
-			avg := float64(s.sum) / float64(s.count)
+			avg := s.sum / float64(s.count)
 			fmt.Fprintf(&b, "%s %-8s %.1f   (%d blocks)\n", s.label, scaledBar(avg, 10, 7), avg, s.count)
 		}
 	}
@@ -2401,9 +2402,9 @@ func loadFocusDistribution() (hist [5]int, median, mean float64, n int, err erro
 	}
 	defer rows.Close()
 
-	var vals []int
+	var vals []float64
 	for rows.Next() {
-		var v int
+		var v float64
 		if err := rows.Scan(&v); err != nil {
 			return hist, 0, 0, 0, err
 		}
@@ -2418,18 +2419,20 @@ func loadFocusDistribution() (hist [5]int, median, mean float64, n int, err erro
 		return hist, 0, 0, 0, nil
 	}
 
-	sum := 0
+	sum := 0.0
 	for _, v := range vals {
-		hist[(v-1)/2]++ // 1-2->0, 3-4->1, 5-6->2, 7-8->3, 9-10->4
+		bucket := int(math.Floor((v - 1) / 2))
+		bucket = min(max(bucket, 0), 4)
+		hist[bucket]++ // 1-2->0, 3-4->1, 5-6->2, 7-8->3, 9-10->4
 		sum += v
 	}
-	mean = float64(sum) / float64(n)
+	mean = sum / float64(n)
 
-	sort.Ints(vals)
+	sort.Float64s(vals)
 	if n%2 == 1 {
-		median = float64(vals[n/2])
+		median = vals[n/2]
 	} else {
-		median = float64(vals[n/2-1]+vals[n/2]) / 2
+		median = (vals[n/2-1] + vals[n/2]) / 2
 	}
 	return hist, median, mean, n, nil
 }
@@ -2477,7 +2480,7 @@ func scaledBar(value, max float64, maxWidth int) string {
 
 type tuiStartTimeStat struct {
 	label string
-	sum   int
+	sum   float64
 	count int
 }
 
@@ -2499,12 +2502,12 @@ func loadStartTimeStats() ([]tuiStartTimeStat, error) {
 	}
 	defer rows.Close()
 
-	sums := make([]int, len(startTimeBuckets))
+	sums := make([]float64, len(startTimeBuckets))
 	counts := make([]int, len(startTimeBuckets))
 
 	for rows.Next() {
 		var createdAt string
-		var focus int
+		var focus float64
 		if err := rows.Scan(&createdAt, &focus); err != nil {
 			return nil, err
 		}
@@ -2557,7 +2560,7 @@ func (m tuiModel) viewBlockDetail() string {
 	row("Files/links", d.filesLinks)
 	focus := "-"
 	if d.focus != nil {
-		focus = strconv.Itoa(*d.focus)
+		focus = strconv.FormatFloat(*d.focus, 'f', 1, 64)
 	}
 	row("Focus quality", focus)
 	row("Tweak", d.tweak)

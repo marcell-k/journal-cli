@@ -13,8 +13,8 @@ import (
 
 var (
 	sleepHours   float64
-	sleepQuality int
-	sleepFeel    int
+	sleepQuality float64
+	sleepFeel    float64
 	sleepDay     string
 	sleepWater   float64
 	sleepNotes   string
@@ -48,16 +48,16 @@ var sleepLogCmd = &cobra.Command{
 
 		quality := sleepQuality
 		if !cmd.Flags().Changed("quality") {
-			quality = askInt(reader, "Sleep quality", 1, 10)
+			quality = askFloat(reader, "Sleep quality", 1, 10)
 		} else if quality < 1 || quality > 10 {
-			return fmt.Errorf("--quality must be between 1 and 10, got %d", quality)
+			return fmt.Errorf("--quality must be between 1 and 10, got %v", quality)
 		}
 
 		feel := sleepFeel
 		if !cmd.Flags().Changed("feel") {
-			feel = askInt(reader, "Feel", 1, 10)
+			feel = askFloat(reader, "Feel", 1, 10)
 		} else if feel < 1 || feel > 10 {
-			return fmt.Errorf("--feel must be between 1 and 10, got %d", feel)
+			return fmt.Errorf("--feel must be between 1 and 10, got %v", feel)
 		}
 		water := sleepWater
 		if !cmd.Flags().Changed("water") {
@@ -81,7 +81,7 @@ var sleepLogCmd = &cobra.Command{
 			return err
 		}
 
-		fmt.Printf("Checkin saved for %s: sleep=%.1fh quality=%d feel=%d water=%.1fL\n", day, hours, quality, feel, water)
+		fmt.Printf("Checkin saved for %s: sleep=%.1fh quality=%.1f feel=%.1f water=%.1fL\n", day, hours, quality, feel, water)
 		return nil
 	},
 }
@@ -108,8 +108,8 @@ func askFloat(reader *bufio.Reader, prompt string, min, max float64) float64 {
 
 func init() {
 	sleepLogCmd.Flags().Float64Var(&sleepHours, "hours", 0, "hours of sleep")
-	sleepLogCmd.Flags().IntVar(&sleepQuality, "quality", 0, "sleep quality 1-10")
-	sleepLogCmd.Flags().IntVar(&sleepFeel, "feel", 0, "how you feel 1-10")
+	sleepLogCmd.Flags().Float64Var(&sleepQuality, "quality", 0, "sleep quality 1-10")
+	sleepLogCmd.Flags().Float64Var(&sleepFeel, "feel", 0, "how you feel 1-10")
 	sleepLogCmd.Flags().Float64Var(&sleepWater, "water", 0, "water intake in liters")
 	sleepLogCmd.Flags().StringVar(&sleepDay, "day", "", "day to log for (YYYY-MM-DD), defaults to today")
 	sleepLogCmd.Flags().StringVar(&sleepNotes, "notes", "", "optional notes")

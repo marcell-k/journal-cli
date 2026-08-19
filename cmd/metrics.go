@@ -61,11 +61,11 @@ var metricsSleepCmd = &cobra.Command{
 
 		fmt.Println("=== Daily checkins (this week) ===")
 		var sumHours, sumWater float64
-		var sumQuality, sumFeel, waterN, n int
+		var sumQuality, sumFeel float64
+		var waterN, n int
 		for rows.Next() {
 			var rawDate string
-			var hours float64
-			var quality, feel int
+			var hours, quality, feel float64
 			var water sql.NullFloat64
 			if err := rows.Scan(&rawDate, &hours, &quality, &feel, &water); err != nil {
 				return err
@@ -80,7 +80,7 @@ var metricsSleepCmd = &cobra.Command{
 				sumWater += water.Float64
 				waterN++
 			}
-			fmt.Printf("%s  sleep:%.1fh  quality:%d  feel:%d  water:%s\n", displayDate, hours, quality, feel, waterStr)
+			fmt.Printf("%s  sleep:%.1fh  quality:%.1f  feel:%.1f  water:%s\n", displayDate, hours, quality, feel, waterStr)
 
 			sumHours += hours
 			sumQuality += quality
@@ -101,7 +101,7 @@ var metricsSleepCmd = &cobra.Command{
 			avgWaterStr = fmt.Sprintf("%.1fL", sumWater/float64(waterN))
 		}
 		fmt.Printf("\nAvg sleep: %.1fh | Avg quality: %.1f | Avg feel: %.1f | Avg water: %s\n",
-			sumHours/float64(n), float64(sumQuality)/float64(n), float64(sumFeel)/float64(n), avgWaterStr)
+			sumHours/float64(n), sumQuality/float64(n), sumFeel/float64(n), avgWaterStr)
 
 		return nil
 	},
@@ -124,14 +124,13 @@ var metricsCorrelateCmd = &cobra.Command{
 
 		var hours, quality, feel, focus []float64
 		for rows.Next() {
-			var h, avgFocus float64
-			var q, f int
+			var h, avgFocus, q, f float64
 			if err := rows.Scan(&h, &q, &f, &avgFocus); err != nil {
 				return err
 			}
 			hours = append(hours, h)
-			quality = append(quality, float64(q))
-			feel = append(feel, float64(f))
+			quality = append(quality, q)
+			feel = append(feel, f)
 			focus = append(focus, avgFocus)
 		}
 		if err := rows.Err(); err != nil {
