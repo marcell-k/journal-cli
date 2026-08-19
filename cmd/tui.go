@@ -200,7 +200,7 @@ var (
 		"Files/links",
 	}
 	blockStartFieldLabels    = []string{"Outcome", "Context reload"}
-	sleepFieldLabels         = []string{"Day", "Hours", "Quality (1-10)", "Feel (1-10)", "Water (L)"}
+	sleepFieldLabels         = []string{"Hours", "Quality (1-10)", "Feel (1-10)", "Water (L)", "Day"}
 	goalAddFieldLabels       = []string{"Goal", "Day"}
 	goalEditFieldLabels      = []string{"Goal"}
 	projectAddFieldLabels    = []string{"Name"}
@@ -295,7 +295,7 @@ func newTUIModel() (tuiModel, error) {
 }
 
 func (m *tuiModel) reload() error {
-	weekStart := mondayOf(time.Now()).Format("2006-01-02")
+	weekStart := mondayOf(time.Now().In(displayLoc)).Format("2006-01-02")
 
 	blocks, err := loadTUIBlocks(weekStart)
 	if err != nil {
@@ -898,7 +898,7 @@ func (m *tuiModel) goalAdvanceWeek() {
 
 func loadTUISleep(weekStart string) ([]tuiSleep, error) {
 	rows, err := conn.Query(
-		`SELECT date, sleep_hours, sleep_quality, feel, water_intake FROM daily_checkin WHERE date >= ? ORDER BY date`,
+		`SELECT date, sleep_hours, sleep_quality, feel, water_intake FROM daily_checkin WHERE date >= ? ORDER BY date DESC`,
 		weekStart,
 	)
 	if err != nil {
@@ -1201,11 +1201,11 @@ func (m tuiModel) updateBrowse(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				waterStr = strconv.FormatFloat(s.water, 'f', -1, 64)
 			}
 			m.f = newForm("Update sleep checkin", sleepFieldLabels, []string{
-				s.date,
 				strconv.FormatFloat(s.hours, 'f', -1, 64),
 				strconv.Itoa(s.quality),
 				strconv.Itoa(s.feel),
 				waterStr,
+				s.date,
 			})
 		case tabProjects:
 			if len(m.projects) == 0 {
@@ -1443,7 +1443,7 @@ func (m tuiModel) submitBlockStart() (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
-	today := time.Now().Format("2006-01-02")
+	today := time.Now().In(displayLoc).Format("2006-01-02")
 	var nextNum int
 	if err := conn.QueryRow(`SELECT COALESCE(MAX(block_num), 0) + 1 FROM blocks WHERE date = ?`, today).Scan(&nextNum); err != nil {
 		m.err = err
@@ -1454,7 +1454,7 @@ func (m tuiModel) submitBlockStart() (tea.Model, tea.Cmd) {
 	_, err := conn.Exec(
 		`INSERT INTO blocks (date, block_num, day, project_id, outcome, context_reload)
 		 VALUES (?, ?, ?, ?, ?, ?)`,
-		today, nextNum, time.Now().Format("Mon"), m.f.ctxID, outcome, contextReload,
+		today, nextNum, time.Now().In(displayLoc).Format("Mon"), m.f.ctxID, outcome, contextReload,
 	)
 	if err != nil {
 		m.err = err
@@ -1573,12 +1573,12 @@ func (m tuiModel) submitGoalAdd() (tea.Model, tea.Cmd) {
 
 	weekStart := m.f.ctxLabel
 	if weekStart == "" {
-		weekStart = mondayOf(time.Now()).Format("2006-01-02")
+		weekStart = mondayOf(time.Now().In(displayLoc)).Format("2006-01-02")
 	}
 
 	day := "Mon"
-	if weekStart == mondayOf(time.Now()).Format("2006-01-02") {
-		day = time.Now().Format("Mon")
+	if weekStart == mondayOf(time.Now().In(displayLoc)).Format("2006-01-02") {
+		day = time.Now().In(displayLoc).Format("Mon")
 	}
 	if dayRaw != "" {
 		canonical, ok := validDays[strings.ToLower(dayRaw)]
@@ -1634,13 +1634,13 @@ func (m tuiModel) submitGoalEdit() (tea.Model, tea.Cmd) {
 }
 
 func (m tuiModel) submitSleepSave() (tea.Model, tea.Cmd) {
-	dayRaw := strings.TrimSpace(m.f.values[0])
-	hoursRaw := strings.TrimSpace(m.f.values[1])
-	qualityRaw := strings.TrimSpace(m.f.values[2])
-	feelRaw := strings.TrimSpace(m.f.values[3])
-	waterRaw := strings.TrimSpace(m.f.values[4])
+	hoursRaw := strings.TrimSpace(m.f.values[0])
+	qualityRaw := strings.TrimSpace(m.f.values[1])
+	feelRaw := strings.TrimSpace(m.f.values[2])
+	waterRaw := strings.TrimSpace(m.f.values[3])
+	dayRaw := strings.TrimSpace(m.f.values[4])
 
-	day := time.Now().Format("2006-01-02")
+	day := time.Now().In(displayLoc).Format("2006-01-02")
 	if dayRaw != "" {
 		if _, err := time.Parse("2006-01-02", dayRaw); err != nil {
 			m.f.errMsg = "Day must be YYYY-MM-DD."
@@ -2071,7 +2071,7 @@ func (m tuiModel) viewSleep() string {
 	t := table.New().
 		Border(lipgloss.RoundedBorder()).
 		BorderStyle(tableBorderStyle).
-		Headers("", "Date", "Day", "Sleep", "Quality", "Feel", "Water").
+		Headers("", "Date", "Sleep", "Quality", "Feel", "Water", "Day").
 		StyleFunc(func(row, col int) lipgloss.Style {
 			if row == table.HeaderRow {
 				return tableHeaderStyle
@@ -2079,12 +2079,12 @@ func (m tuiModel) viewSleep() string {
 			s := m.sleep[row]
 			selected := row == m.sleepCur
 			switch col {
-			case 4: // Quality
+			case 3: // Quality
 				if selected {
 					return rowSelectedStyle
 				}
 				return focusStyle(s.quality)
-			case 5: // Feel
+			case 4: // Feel
 				if selected {
 					return rowSelectedStyle
 				}
@@ -2110,7 +2110,7 @@ func (m tuiModel) viewSleep() string {
 			sumWater += s.water
 			waterN++
 		}
-		t.Row(marker, s.date, s.weekday, fmt.Sprintf("%.1fh", s.hours), strconv.Itoa(s.quality), strconv.Itoa(s.feel), waterStr)
+		t.Row(marker, s.date, fmt.Sprintf("%.1fh", s.hours), strconv.Itoa(s.quality), strconv.Itoa(s.feel), waterStr, s.weekday)
 
 		sumHours += s.hours
 		sumQuality += s.quality
