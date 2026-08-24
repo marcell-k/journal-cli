@@ -3,10 +3,10 @@ package cmd
 import (
 	"database/sql"
 	"fmt"
-	"math"
 	"time"
 
 	"github.com/spf13/cobra"
+	"journal/internal/stats"
 )
 
 var metricsCmd = &cobra.Command{
@@ -143,33 +143,10 @@ var metricsCorrelateCmd = &cobra.Command{
 		}
 
 		fmt.Printf("Paired days: %d\n", len(hours))
-		fmt.Printf("sleep_hours   <-> focus_quality  r=%.2f\n", pearson(hours, focus))
-		fmt.Printf("sleep_quality <-> focus_quality  r=%.2f\n", pearson(quality, focus))
-		fmt.Printf("feel          <-> focus_quality  r=%.2f\n", pearson(feel, focus))
+		fmt.Printf("sleep_hours   <-> focus_quality  r=%.2f\n", stats.Pearson(hours, focus))
+		fmt.Printf("sleep_quality <-> focus_quality  r=%.2f\n", stats.Pearson(quality, focus))
+		fmt.Printf("feel          <-> focus_quality  r=%.2f\n", stats.Pearson(feel, focus))
 		fmt.Println("\n(|r|<0.3 weak, 0.3-0.6 moderate, >0.6 strong — treat as trend, not proof, until 30+ days)")
 		return nil
 	},
-}
-
-// pearson computes the Pearson correlation coefficient between two equal-length series.
-func pearson(xs, ys []float64) float64 {
-	n := float64(len(xs))
-	var sumX, sumY, sumXY, sumX2, sumY2 float64
-	for i := range xs {
-		sumX += xs[i]
-		sumY += ys[i]
-		sumXY += xs[i] * ys[i]
-		sumX2 += xs[i] * xs[i]
-		sumY2 += ys[i] * ys[i]
-	}
-	den := math.Sqrt((n*sumX2 - sumX*sumX) * (n*sumY2 - sumY*sumY))
-	if den == 0 {
-		return 0
-	}
-	return (n*sumXY - sumX*sumY) / den
-}
-
-func init() {
-	metricsCmd.AddCommand(metricsWeekCmd, metricsSleepCmd, metricsCorrelateCmd)
-	rootCmd.AddCommand(metricsCmd)
 }

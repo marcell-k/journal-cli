@@ -198,3 +198,10 @@ func init() {
 	blockCmd.AddCommand(blockListCmd, blockShowCmd)
 	rootCmd.AddCommand(blockCmd)
 }
+
+func nullOr(v sql.NullString) string {
+	if v.Valid && v.String != "" {
+		return v.String
+	}
+	return "-"
+}
