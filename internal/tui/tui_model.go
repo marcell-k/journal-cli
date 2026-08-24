@@ -263,7 +263,6 @@ func weekDates(weekStart string) [7]string {
 	return out
 }
 
-// firstWeekStart returns the earliest week_start ever logged, or "" if none.
 func firstWeekStart() (string, error) {
 	var s sql.NullString
 	if err := tuiDB.QueryRow(`SELECT MIN(week_start) FROM weekly_goals`).Scan(&s); err != nil {
@@ -275,7 +274,6 @@ func firstWeekStart() (string, error) {
 	return s.String, nil
 }
 
-// weekNumFor computes a 1-based, ever-increasing week number relative to firstStart.
 func weekNumFor(weekStart, firstStart string) int {
 	if firstStart == "" {
 		return 1

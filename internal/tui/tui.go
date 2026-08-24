@@ -64,6 +64,9 @@ var (
 	focusMidStyle    = lipgloss.NewStyle().Padding(0, 1).Foreground(lipgloss.Color("#e6c384"))
 	focusLowStyle    = lipgloss.NewStyle().Padding(0, 1).Foreground(lipgloss.Color("#e46876"))
 
+	deepTypeStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("#7fb4ca"))
+	shallowTypeStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#e6c384"))
+
 	bannerStyle = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#7fb4ca")).
 			Border(lipgloss.RoundedBorder()).Padding(0, 1).MarginTop(1).MarginBottom(1)
 	cursorStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#e6c384"))
@@ -71,6 +74,14 @@ var (
 	errStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("#e46876"))
 	okStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("#87a987"))
 )
+
+// ---------- block-type ----------
+func typeGlyph(blockType string) string {
+	if blockType == "shallow" {
+		return shallowTypeStyle.Render("●")
+	}
+	return deepTypeStyle.Render("●")
+}
 
 // ---------- open-block header info ----------
 

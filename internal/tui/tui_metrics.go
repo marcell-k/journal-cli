@@ -217,7 +217,7 @@ func statusStyle(status string) lipgloss.Style {
 	switch status {
 	case "OPEN":
 		return okStyle
-	case "CLOSED":
+	case "CLOSED", "DONE":
 		return dimStyle
 	default:
 		return tableCellStyle

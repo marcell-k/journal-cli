@@ -429,11 +429,15 @@ func (m tuiModel) updateStartProject(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "up", "k":
 		if m.projectCur > 0 {
 			m.projectCur--
+		} else if len(m.projects) > 0 {
+			m.projectCur = len(m.projects) - 1
 		}
 		return m, nil
 	case "down", "j":
 		if m.projectCur < len(m.projects)-1 {
 			m.projectCur++
+		} else if len(m.projects) > 0 {
+			m.projectCur = 0
 		}
 		return m, nil
 	case "enter":

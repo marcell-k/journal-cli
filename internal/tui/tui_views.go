@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/lipgloss/table"
+	"math"
 	"strconv"
 	"strings"
 	"time"
@@ -193,15 +194,20 @@ func (m tuiModel) viewBlocks() string {
 			blk := m.blocks[row]
 			selected := row == m.blockCur
 			switch col {
+			case 2: // Type
+				if selected {
+					return rowSelectedStyle.Align(lipgloss.Center)
+				}
+				return tableCellStyle.Align(lipgloss.Center)
 			case 3: // Status
 				if selected {
-					return rowSelectedStyle
+					return rowSelectedStyle.Align(lipgloss.Center)
 				}
-				status := "CLOSED"
+				status := "DONE"
 				if !blk.closed {
 					status = "OPEN"
 				}
-				return statusStyle(status).Padding(0, 1)
+				return statusStyle(status).Padding(0, 1).Align(lipgloss.Center)
 			case 6: // Focus
 				if selected {
 					return rowSelectedStyle.Align(lipgloss.Right)
@@ -224,24 +230,27 @@ func (m tuiModel) viewBlocks() string {
 			marker = "▶"
 		}
 		idStr := fmt.Sprintf("%s%*d", marker, 3, blk.blockNum)
-		status := "CLOSED"
+		status := "DONE"
 		if !blk.closed {
 			status = "OPEN"
 		}
 		focus := "-"
 		if blk.focus != nil {
-			focus = strconv.FormatFloat(*blk.focus, 'f', 1, 64)
+			focus = formatFocus(*blk.focus)
 		}
-		typ := "deep"
-		if blk.blockType == "shallow" {
-			typ = "shallow"
-		}
-		t.Row(idStr, dateOnly(blk.date), typ, truncate(status, clampColWidth), truncate(blk.project, clampColWidth), truncate(blk.length, clampColWidth), truncate(focus, clampColWidth), truncate(blk.outcome, outcomeColWidth))
+		t.Row(idStr, dateOnly(blk.date), typeGlyph(blk.blockType), truncate(status, clampColWidth), truncate(blk.project, clampColWidth), truncate(blk.length, clampColWidth), truncate(focus, clampColWidth), truncate(blk.outcome, outcomeColWidth))
 	}
 
 	b.WriteString(t.Render())
 	b.WriteString("\n")
 	return b.String()
+}
+
+func formatFocus(f float64) string {
+	if f == math.Trunc(f) {
+		return strconv.Itoa(int(f))
+	}
+	return strconv.FormatFloat(f, 'f', 1, 64)
 }
 
 func truncate(s string, n int) string {
