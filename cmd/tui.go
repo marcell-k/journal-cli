@@ -4,6 +4,9 @@ import (
 	"database/sql"
 	"fmt"
 	"math"
+	"os"
+	"os/exec"
+	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
@@ -23,13 +26,35 @@ const (
 	tabGoals
 	tabSleep
 	tabProjects
+	tabNotes
 	tabMetrics
 	tabCount
 )
 
 const weeksToShow = 3
 
-var tabNames = [tabCount]string{"Blocks", "Goals", "Wellness", "Projects", "Metrics"}
+const notesDir = "notes"
+
+var tabNames = [tabCount]string{"Blocks", "Goals", "Wellness", "Projects", "Notes", "Metrics"}
+
+type notesEditorMsg struct{ err error }
+
+func openNoteEditor(projectID int) tea.Cmd {
+	if err := os.MkdirAll(notesDir, 0o755); err != nil {
+		return func() tea.Msg { return notesEditorMsg{err: err} }
+	}
+	path := filepath.Join(notesDir, fmt.Sprintf("%d.md", projectID))
+	c := exec.Command("nvim", path)
+	return tea.ExecProcess(c, func(err error) tea.Msg {
+		return notesEditorMsg{err: err}
+	})
+}
+
+func hasNotes(projectID int) bool {
+	path := filepath.Join(notesDir, fmt.Sprintf("%d.md", projectID))
+	info, err := os.Stat(path)
+	return err == nil && info.Size() > 0
+}
 
 // ---------- styles ----------
 
@@ -1038,6 +1063,14 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.width, m.height = msg.Width, msg.Height
 		return m, nil
+	case notesEditorMsg:
+		if msg.err != nil {
+			m.err = msg.err
+		} else {
+			m.err = nil
+			m.status = "Notes saved."
+		}
+		return m, nil
 	case tickMsg:
 		// No-op besides re-scheduling: View() reads time.Now() directly,
 		// so simply causing a re-render every 5s keeps the header live.
@@ -1097,7 +1130,7 @@ func (m tuiModel) updateBrowse(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			if m.sleepCur > 0 {
 				m.sleepCur--
 			}
-		case tabProjects:
+		case tabProjects, tabNotes:
 			if m.projectCur > 0 {
 				m.projectCur--
 			}
@@ -1116,7 +1149,7 @@ func (m tuiModel) updateBrowse(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			if m.sleepCur < len(m.sleep)-1 {
 				m.sleepCur++
 			}
-		case tabProjects:
+		case tabProjects, tabNotes:
 			if m.projectCur < len(m.projects)-1 {
 				m.projectCur++
 			}
@@ -1354,8 +1387,13 @@ func (m tuiModel) updateBrowse(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 					m.mode = "block_detail"
 				}
 			}
+		case tabNotes:
+			if msg.String() == "enter" && len(m.projects) > 0 {
+				p := m.projects[m.projectCur]
+				return m, openNoteEditor(p.id)
+			}
+			return m, nil
 		}
-		return m, nil
 	}
 	return m, nil
 }
@@ -1926,6 +1964,8 @@ func (m tuiModel) View() string {
 			b.WriteString(m.viewSleep())
 		case tabProjects:
 			b.WriteString(m.viewProjects())
+		case tabNotes:
+			b.WriteString(m.viewNotes())
 		case tabMetrics:
 			b.WriteString(m.viewMetrics())
 		}
@@ -1944,6 +1984,33 @@ func (m tuiModel) View() string {
 
 	return b.String()
 }
+
+func (m tuiModel) viewNotes() string {
+	if len(m.projects) == 0 {
+		return headerStyle.Render("=== Notes ===") + "\n" + dimStyle.Render("No projects yet — switch to Projects tab and press n to add one.")
+	}
+
+	var b strings.Builder
+	b.WriteString(headerStyle.Render("=== Notes ==="))
+	b.WriteString("\n")
+
+	for i, p := range m.projects {
+		marker := "○"
+		if hasNotes(p.id) {
+			marker = "●"
+		}
+		line := fmt.Sprintf("%s %s", marker, p.name)
+		if i == m.projectCur {
+			b.WriteString(cursorStyle.Render("> " + line))
+		} else {
+			b.WriteString("  ")
+			b.WriteString(line)
+		}
+		b.WriteString("\n")
+	}
+	return b.String()
+}
+
 func (m tuiModel) headerBar() string {
 	now := time.Now().In(displayLoc)
 
@@ -1992,6 +2059,8 @@ func (m tuiModel) helpLine() string {
 		return "tab: switch section  •  ↑↓/jk: move  •  n: new  •  u: update  •  d: delete  •  r: reload  •  q: quit"
 	case tabProjects:
 		return "tab: switch section  •  ↑↓/jk: move  •  n: new  •  u: rename  •  d: delete  •  r: reload  •  q: quit"
+	case tabNotes:
+		return "tab: switch section  •  ↑↓/jk: move  •  enter: edit in nvim  •  q: quit"
 	default:
 		return "tab: switch section  •  r: reload  •  q: quit"
 	}
