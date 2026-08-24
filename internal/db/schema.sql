@@ -34,6 +34,7 @@ CREATE TABLE IF NOT EXISTS blocks (
     files_links     TEXT,
 
     focus_quality REAL CHECK (focus_quality BETWEEN 1 AND 10),
+    block_type      TEXT NOT NULL DEFAULT 'deep',
     tweak           TEXT,
 
     created_at      TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,

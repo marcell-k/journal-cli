@@ -27,6 +27,8 @@ const (
 	tabCount
 )
 
+const weeksToShow = 3
+
 var tabNames = [tabCount]string{"Blocks", "Goals", "Wellness", "Projects", "Metrics"}
 
 // ---------- styles ----------
@@ -87,6 +89,7 @@ type tuiBlock struct {
 	date, day    string
 	project      string
 	outcome      string
+	blockType    string
 	focus        *float64
 	length       string
 	closed       bool
@@ -200,6 +203,8 @@ var (
 		"Files/links",
 	}
 	blockStartFieldLabels    = []string{"Outcome", "Context reload"}
+	blockLogFieldLabels      = []string{"Outcome", "Description", "Hours"}
+	shallowUpdateFieldLabels = []string{"Outcome", "Description"}
 	sleepFieldLabels         = []string{"Hours", "Quality (1-10)", "Feel (1-10)", "Water (L)", "Day"}
 	goalAddFieldLabels       = []string{"Goal", "Day"}
 	goalEditFieldLabels      = []string{"Goal"}
@@ -226,6 +231,7 @@ type tuiBlockDetail struct {
 
 	deliverable, doneNotes, notDoneNotes string
 	nextStep, filesLinks, tweak          string
+	blockType                            string
 
 	focus *float64
 
@@ -296,8 +302,9 @@ func newTUIModel() (tuiModel, error) {
 
 func (m *tuiModel) reload() error {
 	weekStart := mondayOf(time.Now().In(displayLoc)).Format("2006-01-02")
+	rangeStart := mondayOf(time.Now().In(displayLoc)).AddDate(0, 0, -7*(weeksToShow-1)).Format("2006-01-02")
 
-	blocks, err := loadTUIBlocks(weekStart)
+	blocks, err := loadTUIBlocks(rangeStart)
 	if err != nil {
 		return err
 	}
@@ -335,7 +342,7 @@ func (m *tuiModel) reload() error {
 		}
 	}
 
-	sleep, err := loadTUISleep(weekStart)
+	sleep, err := loadTUISleep(rangeStart)
 	if err != nil {
 		return err
 	}
@@ -442,7 +449,7 @@ func loadOpenBlock() (*openBlockInfo, error) {
 
 func loadTUIBlocks(weekStart string) ([]tuiBlock, error) {
 	rows, err := conn.Query(`
-		SELECT b.id, b.date, b.block_num, b.day, p.name, b.outcome, b.focus_quality, b.created_at, b.closed_at
+		SELECT b.id, b.date, b.block_num, b.day, p.name, b.outcome, b.block_type, b.focus_quality, b.created_at, b.closed_at
 		FROM blocks b LEFT JOIN projects p ON p.id = b.project_id
 		WHERE b.date >= ?
 		ORDER BY b.date DESC, b.block_num DESC`, weekStart)
@@ -458,7 +465,7 @@ func loadTUIBlocks(weekStart string) ([]tuiBlock, error) {
 		var focus *float64
 		var createdAt string
 		var closedAt *string
-		if err := rows.Scan(&b.id, &b.date, &b.blockNum, &b.day, &project, &b.outcome, &focus, &createdAt, &closedAt); err != nil {
+		if err := rows.Scan(&b.id, &b.date, &b.blockNum, &b.day, &project, &b.outcome, &b.blockType, &focus, &createdAt, &closedAt); err != nil {
 			return nil, err
 		}
 		if project != nil {
@@ -984,12 +991,12 @@ func loadBlockDetail(id int) (tuiBlockDetail, error) {
 	err := conn.QueryRow(`
 		SELECT b.id, b.date, b.block_num, b.day, p.name, b.outcome, b.context_reload,
 		       b.deliverable, b.done_notes, b.not_done_notes, b.next_step, b.files_links,
-		       b.focus_quality, b.tweak, b.created_at, b.closed_at
+		       b.focus_quality, b.tweak, b.created_at, b.closed_at, b.block_type
 		FROM blocks b LEFT JOIN projects p ON p.id = b.project_id
 		WHERE b.id = ?`, id,
 	).Scan(&d.id, &d.date, &d.blockNum, &d.day, &project, &d.outcome, &d.contextReload,
 		&deliverable, &doneNotes, &notDoneNotes, &nextStep, &filesLinks,
-		&focus, &tweak, &d.createdAt, &closedAt)
+		&focus, &tweak, &d.createdAt, &closedAt, &d.blockType)
 	if err != nil {
 		return d, err
 	}
@@ -1125,6 +1132,7 @@ func (m tuiModel) updateBrowse(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 			m.mode = "start_project"
+			m.formPurpose = "block_start"
 			m.projectCur = 0
 		case tabGoals:
 			w := m.currentGoalWeek()
@@ -1150,6 +1158,19 @@ func (m tuiModel) updateBrowse(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
+	// s: log shallow work — retroactive, already-closed block. Blocks tab only.
+	case "s":
+		if m.tab == tabBlocks {
+			if len(m.projects) == 0 {
+				m.status = "No projects yet — switch to the Projects tab and press n to add one."
+				return m, nil
+			}
+			m.mode = "start_project"
+			m.formPurpose = "block_log"
+			m.projectCur = 0
+		}
+		return m, nil
+
 	// u: update — same key, same meaning, on every tab.
 	case "u":
 		switch m.tab {
@@ -1167,15 +1188,24 @@ func (m tuiModel) updateBrowse(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			// 	m.status = "That block is already closed."
 			// 	return m, nil
 			// }
-			m.mode = "form"
-			m.formPurpose = "block_update"
-			m.f = newForm(fmt.Sprintf("Updating block #%d", b.blockNum), blockUpdateFieldLabels, []string{
-				valOrEmpty(d.outcome), valOrEmpty(d.contextReload),
-				valOrEmpty(d.deliverable), valOrEmpty(d.doneNotes), valOrEmpty(d.notDoneNotes),
-				valOrEmpty(d.filesLinks),
-			})
-			m.f.ctxID = b.id
-			m.f.field = 2
+			if d.blockType == "shallow" {
+				m.mode = "form"
+				m.formPurpose = "block_update_shallow"
+				m.f = newForm(fmt.Sprintf("Updating shallow block #%d", b.blockNum), shallowUpdateFieldLabels, []string{
+					valOrEmpty(d.outcome), valOrEmpty(d.doneNotes),
+				})
+				m.f.ctxID = b.id
+			} else {
+				m.mode = "form"
+				m.formPurpose = "block_update"
+				m.f = newForm(fmt.Sprintf("Updating block #%d", b.blockNum), blockUpdateFieldLabels, []string{
+					valOrEmpty(d.outcome), valOrEmpty(d.contextReload),
+					valOrEmpty(d.deliverable), valOrEmpty(d.doneNotes), valOrEmpty(d.notDoneNotes),
+					valOrEmpty(d.filesLinks),
+				})
+				m.f.ctxID = b.id
+				m.f.field = 2
+			}
 		case tabGoals:
 			w := m.currentGoalWeek()
 			if w == nil || m.goalCurDay < 0 || m.goalCurGoal < 0 {
@@ -1357,6 +1387,10 @@ func (m tuiModel) submitForm() (tea.Model, tea.Cmd) {
 		return m.submitBlockStart()
 	case "block_update":
 		return m.submitBlockUpdate()
+	case "block_update_shallow":
+		return m.submitBlockUpdateShallow()
+	case "block_log":
+		return m.submitBlockLog()
 	case "block_append_note":
 		return m.submitBlockAppendNote()
 	case "block_close":
@@ -1396,8 +1430,12 @@ func (m tuiModel) updateStartProject(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "enter":
 		p := m.projects[m.projectCur]
 		m.mode = "form"
-		m.formPurpose = "block_start"
-		m.f = newForm(fmt.Sprintf("New block — %s", p.name), blockStartFieldLabels, nil)
+		if m.formPurpose == "block_log" {
+			m.f = newForm(fmt.Sprintf("Log shallow work — %s", p.name), blockLogFieldLabels, nil)
+		} else {
+			m.formPurpose = "block_start"
+			m.f = newForm(fmt.Sprintf("New block — %s", p.name), blockStartFieldLabels, nil)
+		}
 		m.f.ctxID = p.id
 		return m, nil
 	}
@@ -1466,11 +1504,84 @@ func (m tuiModel) submitBlockStart() (tea.Model, tea.Cmd) {
 		m.err = rerr
 	} else {
 		m.err = nil
-		m.blockCur = 0 // newest block sorts first
+		m.blockCur = 0
 	}
 	return m, nil
 }
 
+func (m tuiModel) submitBlockUpdateShallow() (tea.Model, tea.Cmd) {
+	outcome := strings.TrimSpace(m.f.values[0])
+	description := strings.TrimSpace(m.f.values[1])
+	if outcome == "" || description == "" {
+		m.f.errMsg = "Outcome and description can't be blank."
+		return m, nil
+	}
+
+	_, err := conn.Exec(`UPDATE blocks SET outcome = ?, done_notes = ? WHERE id = ?`, outcome, description, m.f.ctxID)
+	if err != nil {
+		m.err = err
+		m.mode = "browse"
+		return m, nil
+	}
+
+	m.mode = "browse"
+	m.status = "Shallow block updated."
+	if rerr := m.reload(); rerr != nil {
+		m.err = rerr
+	} else {
+		m.err = nil
+	}
+	return m, nil
+}
+
+func (m tuiModel) submitBlockLog() (tea.Model, tea.Cmd) {
+	outcome := strings.TrimSpace(m.f.values[0])
+	description := strings.TrimSpace(m.f.values[1])
+	hoursRaw := strings.TrimSpace(m.f.values[2])
+
+	if outcome == "" || description == "" {
+		m.f.errMsg = "Outcome and description can't be blank."
+		return m, nil
+	}
+	hours, err := strconv.ParseFloat(hoursRaw, 64)
+	if err != nil || hours <= 0 || hours > 24 {
+		m.f.errMsg = "Hours must be a number 0-24."
+		return m, nil
+	}
+
+	end := time.Now().In(displayLoc)
+	start := end.Add(-time.Duration(hours * float64(time.Hour)))
+	today := end.Format("2006-01-02")
+
+	var nextNum int
+	if err := conn.QueryRow(`SELECT COALESCE(MAX(block_num), 0) + 1 FROM blocks WHERE date = ?`, today).Scan(&nextNum); err != nil {
+		m.err = err
+		m.mode = "browse"
+		return m, nil
+	}
+
+	_, err = conn.Exec(
+		`INSERT INTO blocks (date, block_num, day, project_id, outcome, done_notes, block_type, created_at, closed_at)
+		 VALUES (?, ?, ?, ?, ?, ?, 'shallow', ?, ?)`,
+		today, nextNum, end.Format("Mon"), m.f.ctxID, outcome, description,
+		start.Format("2006-01-02 15:04:05"), end.Format("2006-01-02 15:04:05"),
+	)
+	if err != nil {
+		m.err = err
+		m.mode = "browse"
+		return m, nil
+	}
+
+	m.mode = "browse"
+	m.status = fmt.Sprintf("Shallow block #%d logged (%.1fh).", nextNum, hours)
+	if rerr := m.reload(); rerr != nil {
+		m.err = rerr
+	} else {
+		m.err = nil
+		m.blockCur = 0
+	}
+	return m, nil
+}
 func (m tuiModel) submitBlockUpdate() (tea.Model, tea.Cmd) {
 	outcome := strings.TrimSpace(m.f.values[0])
 	contextReload := strings.TrimSpace(m.f.values[1])
@@ -1874,7 +1985,7 @@ func (m tuiModel) helpLine() string {
 	}
 	switch m.tab {
 	case tabBlocks:
-		return "tab: switch section  •  ↑↓/jk: move  •  enter: view block  •  n: new  •  u: update  •  c: close  •  d: delete  •  r: reload  •  q: quit"
+		return "tab: switch section  •  ↑↓/jk: move  •  enter: view block  •  n: new  •  s: log shallow  •  u: update  •  c: close  •  d: delete  •  r: reload  •  q: quit"
 	case tabGoals:
 		return "tab: switch section  •  ↑↓/jk: move  •  n: new  •  u: update  •  d: delete  •  enter/space: toggle done  •  r: reload  •  q: quit"
 	case tabSleep:
@@ -1923,7 +2034,7 @@ func (m tuiModel) viewBlocks() string {
 	t := table.New().
 		Border(lipgloss.RoundedBorder()).
 		BorderStyle(tableBorderStyle).
-		Headers("#", "Date", "Status", "Project", "Length", "Focus", "Outcome").
+		Headers("#", "Date", "Type", "Status", "Project", "Length", "Focus", "Outcome").
 		StyleFunc(func(row, col int) lipgloss.Style {
 			if row == table.HeaderRow {
 				return tableHeaderStyle
@@ -1931,7 +2042,7 @@ func (m tuiModel) viewBlocks() string {
 			blk := m.blocks[row]
 			selected := row == m.blockCur
 			switch col {
-			case 2: // Status
+			case 3: // Status
 				if selected {
 					return rowSelectedStyle
 				}
@@ -1940,7 +2051,7 @@ func (m tuiModel) viewBlocks() string {
 					status = "OPEN"
 				}
 				return statusStyle(status).Padding(0, 1)
-			case 5: // Focus
+			case 6: // Focus
 				if selected {
 					return rowSelectedStyle.Align(lipgloss.Right)
 				}
@@ -1970,7 +2081,11 @@ func (m tuiModel) viewBlocks() string {
 		if blk.focus != nil {
 			focus = strconv.FormatFloat(*blk.focus, 'f', 1, 64)
 		}
-		t.Row(idStr, dateOnly(blk.date), truncate(status, clampColWidth), truncate(blk.project, clampColWidth), truncate(blk.length, clampColWidth), truncate(focus, clampColWidth), truncate(blk.outcome, outcomeColWidth))
+		typ := "deep"
+		if blk.blockType == "shallow" {
+			typ = "shallow"
+		}
+		t.Row(idStr, dateOnly(blk.date), typ, truncate(status, clampColWidth), truncate(blk.project, clampColWidth), truncate(blk.length, clampColWidth), truncate(focus, clampColWidth), truncate(blk.outcome, outcomeColWidth))
 	}
 
 	b.WriteString(t.Render())

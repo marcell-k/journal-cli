@@ -38,5 +38,10 @@ func migrate(conn *sql.DB) error {
 			return err
 		}
 	}
+	if _, err := conn.Exec(`ALTER TABLE blocks ADD COLUMN block_type TEXT NOT NULL DEFAULT 'deep'`); err != nil {
+		if !strings.Contains(err.Error(), "duplicate column name") {
+			return err
+		}
+	}
 	return nil
 }
