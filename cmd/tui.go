@@ -1009,6 +1009,7 @@ func loadTUIProjects() ([]tuiProject, error) {
 func loadBlockDetail(id int) (tuiBlockDetail, error) {
 	var d tuiBlockDetail
 	var project sql.NullString
+	var outcome, contextReload sql.NullString
 	var deliverable, doneNotes, notDoneNotes, nextStep, filesLinks, tweak sql.NullString
 	var focus sql.NullFloat64
 	var closedAt sql.NullString
@@ -1019,7 +1020,7 @@ func loadBlockDetail(id int) (tuiBlockDetail, error) {
 		       b.focus_quality, b.tweak, b.created_at, b.closed_at, b.block_type
 		FROM blocks b LEFT JOIN projects p ON p.id = b.project_id
 		WHERE b.id = ?`, id,
-	).Scan(&d.id, &d.date, &d.blockNum, &d.day, &project, &d.outcome, &d.contextReload,
+	).Scan(&d.id, &d.date, &d.blockNum, &d.day, &project, &outcome, &contextReload,
 		&deliverable, &doneNotes, &notDoneNotes, &nextStep, &filesLinks,
 		&focus, &tweak, &d.createdAt, &closedAt, &d.blockType)
 	if err != nil {
@@ -1030,6 +1031,8 @@ func loadBlockDetail(id int) (tuiBlockDetail, error) {
 	if project.Valid {
 		d.project = project.String
 	}
+	d.outcome = nullOr(outcome)
+	d.contextReload = nullOr(contextReload)
 	d.deliverable = nullOr(deliverable)
 	d.doneNotes = nullOr(doneNotes)
 	d.notDoneNotes = nullOr(notDoneNotes)
@@ -1123,16 +1126,22 @@ func (m tuiModel) updateBrowse(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		case tabBlocks:
 			if m.blockCur > 0 {
 				m.blockCur--
+			} else if len(m.blocks) > 0 {
+				m.blockCur = len(m.blocks) - 1
 			}
 		case tabGoals:
 			m.goalUp()
 		case tabSleep:
 			if m.sleepCur > 0 {
 				m.sleepCur--
+			} else if len(m.sleep) > 0 {
+				m.sleepCur = len(m.sleep) - 1
 			}
 		case tabProjects, tabNotes:
 			if m.projectCur > 0 {
 				m.projectCur--
+			} else if len(m.projects) > 0 {
+				m.projectCur = len(m.projects) - 1
 			}
 		}
 		return m, nil
@@ -1142,16 +1151,22 @@ func (m tuiModel) updateBrowse(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		case tabBlocks:
 			if m.blockCur < len(m.blocks)-1 {
 				m.blockCur++
+			} else if len(m.blocks) > 0 {
+				m.blockCur = 0
 			}
 		case tabGoals:
 			m.goalDown()
 		case tabSleep:
 			if m.sleepCur < len(m.sleep)-1 {
 				m.sleepCur++
+			} else if len(m.sleep) > 0 {
+				m.blockCur = 0
 			}
 		case tabProjects, tabNotes:
 			if m.projectCur < len(m.projects)-1 {
 				m.projectCur++
+			} else if len(m.projects) > 0 {
+				m.projectCur = 0
 			}
 		}
 		return m, nil
@@ -1550,8 +1565,8 @@ func (m tuiModel) submitBlockStart() (tea.Model, tea.Cmd) {
 func (m tuiModel) submitBlockUpdateShallow() (tea.Model, tea.Cmd) {
 	outcome := strings.TrimSpace(m.f.values[0])
 	description := strings.TrimSpace(m.f.values[1])
-	if outcome == "" || description == "" {
-		m.f.errMsg = "Outcome and description can't be blank."
+	if outcome == "" {
+		m.f.errMsg = "Outcome can't be blank."
 		return m, nil
 	}
 
@@ -1577,8 +1592,8 @@ func (m tuiModel) submitBlockLog() (tea.Model, tea.Cmd) {
 	description := strings.TrimSpace(m.f.values[1])
 	hoursRaw := strings.TrimSpace(m.f.values[2])
 
-	if outcome == "" || description == "" {
-		m.f.errMsg = "Outcome and description can't be blank."
+	if outcome == "" {
+		m.f.errMsg = "Outcome can't be blank."
 		return m, nil
 	}
 	hours, err := strconv.ParseFloat(hoursRaw, 64)
