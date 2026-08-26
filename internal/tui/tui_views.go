@@ -137,7 +137,7 @@ func (m tuiModel) helpLine() string {
 	case tabBlocks:
 		return "tab: switch section  •  ↑↓/jk: move  •  enter: view block  •  n: new  •  s: log shallow  •  u: update  •  c: close  •  d: delete  •  r: reload  •  q: quit"
 	case tabGoals:
-		return "tab: switch section  •  ↑↓/jk: move  •  n: new  •  u: update  •  d: delete  •  enter/space: toggle done  •  r: reload  •  q: quit"
+		return "tab: switch section  •  ↑↓/jk: move  •  ctrl+j/k: reorder  •  n: new  •  u: update  •  d: delete  •  enter/space: toggle done  •  r: reload  •  q: quit"
 	case tabSleep:
 		return "tab: switch section  •  ↑↓/jk: move  •  n: new  •  u: update  •  d: delete  •  r: reload  •  q: quit"
 	case tabProjects:

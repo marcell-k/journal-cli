@@ -292,7 +292,7 @@ func loadGoalWeek(weekStart string, num int) (goalsWeek, error) {
 	}
 
 	rows, err := tuiDB.Query(
-		`SELECT id, day, goal, done FROM weekly_goals WHERE week_start = ? ORDER BY id`,
+		`SELECT id, day, goal, done, COALESCE(sort_order, id) FROM weekly_goals WHERE week_start = ? ORDER BY COALESCE(sort_order, id)`,
 		weekStart,
 	)
 	if err != nil {
@@ -304,7 +304,7 @@ func loadGoalWeek(weekStart string, num int) (goalsWeek, error) {
 	for rows.Next() {
 		n++
 		var g tuiGoal
-		if err := rows.Scan(&g.id, &g.day, &g.goal, &g.done); err != nil {
+		if err := rows.Scan(&g.id, &g.day, &g.goal, &g.done, &g.order); err != nil {
 			return w, err
 		}
 		g.num = n

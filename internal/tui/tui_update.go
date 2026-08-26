@@ -63,6 +63,16 @@ func (m tuiModel) updateBrowse(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "shift+tab":
 		m.tab = (m.tab - 1 + tabCount) % tabCount
 		return m, nil
+	case "ctrl+j":
+		if m.tab == tabGoals {
+			m.moveGoal(1)
+		}
+		return m, nil
+	case "ctrl+k":
+		if m.tab == tabGoals {
+			m.moveGoal(-1)
+		}
+		return m, nil
 	case "1", "2", "3", "4", "5":
 		n, _ := strconv.Atoi(msg.String())
 		m.tab = n - 1
@@ -900,4 +910,33 @@ func (m tuiModel) executeDelete() (tea.Model, tea.Cmd) {
 		m.err = rerr
 	}
 	return m, nil
+}
+
+func (m *tuiModel) moveGoal(delta int) {
+	w := m.currentGoalWeek()
+	if w == nil || m.goalCurDay < 0 || m.goalCurGoal < 0 {
+		return
+	}
+	goals := w.days[m.goalCurDay].goals
+	i, j := m.goalCurGoal, m.goalCurGoal+delta
+	if j < 0 || j >= len(goals) {
+		return
+	}
+	g1, g2 := goals[i], goals[j]
+
+	if _, err := tuiDB.Exec(`UPDATE weekly_goals SET sort_order = ? WHERE id = ?`, g2.order, g1.id); err != nil {
+		m.err = err
+		return
+	}
+	if _, err := tuiDB.Exec(`UPDATE weekly_goals SET sort_order = ? WHERE id = ?`, g1.order, g2.id); err != nil {
+		m.err = err
+		return
+	}
+
+	m.err = nil
+	if rerr := m.reload(); rerr != nil {
+		m.err = rerr
+		return
+	}
+	m.goalCurGoal = j
 }

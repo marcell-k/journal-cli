@@ -138,7 +138,7 @@ func goalIDForNumber(n int) (int, error) {
 	weekStart := mondayOf(time.Now()).Format("2006-01-02")
 	var id int
 	err := conn.QueryRow(
-		`SELECT id FROM weekly_goals WHERE week_start = ? ORDER BY id LIMIT 1 OFFSET ?`,
+		`SELECT id FROM weekly_goals WHERE week_start = ? ORDER BY COALESCE(sort_order, id) LIMIT 1 OFFSET ?`,
 		weekStart, n-1,
 	).Scan(&id)
 	if err == sql.ErrNoRows {
@@ -154,7 +154,7 @@ func goalIDForNumber(n int) (int, error) {
 func printWeekGoals(conn *sql.DB) error {
 	weekStart := mondayOf(time.Now()).Format("2006-01-02")
 	rows, err := conn.Query(
-		`SELECT day, goal, done FROM weekly_goals WHERE week_start = ? ORDER BY id`,
+		`SELECT day, goal, done FROM weekly_goals WHERE week_start = ? ORDER BY COALESCE(sort_order, id)`,
 		weekStart,
 	)
 	if err != nil {

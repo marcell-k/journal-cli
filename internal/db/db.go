@@ -43,5 +43,13 @@ func migrate(conn *sql.DB) error {
 			return err
 		}
 	}
+	if _, err := conn.Exec(`ALTER TABLE weekly_goals ADD COLUMN sort_order INTEGER`); err != nil {
+		if !strings.Contains(err.Error(), "duplicate column name") {
+			return err
+		}
+	}
+	if _, err := conn.Exec(`UPDATE weekly_goals SET sort_order = id WHERE sort_order IS NULL`); err != nil {
+		return err
+	}
 	return nil
 }

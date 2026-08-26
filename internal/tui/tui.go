@@ -130,6 +130,7 @@ type tuiGoal struct {
 	day     string
 	goal    string
 	done    bool
+	order   int
 }
 type goalsDay struct {
 	name  string // Mon..Sun

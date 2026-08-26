@@ -12,7 +12,8 @@ CREATE TABLE IF NOT EXISTS weekly_goals (
     day         TEXT NOT NULL,
     goal        TEXT NOT NULL,
     done        BOOLEAN NOT NULL DEFAULT 0,
-    created_at  TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+    created_at  TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    sort_order  INTEGER
 );
 
 CREATE INDEX IF NOT EXISTS idx_weekly_goals_week_start ON weekly_goals(week_start);
