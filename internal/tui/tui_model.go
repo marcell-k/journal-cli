@@ -130,7 +130,7 @@ func (m *tuiModel) reload() error {
 	}
 	m.correlation = correlation
 
-	weeklyTrend, err := loadWeeklyTrend(weekStart)
+	weeklyTrend, err := loadWeeklyTrend(rangeStart)
 	if err != nil {
 		return err
 	}
@@ -263,6 +263,15 @@ func weekDates(weekStart string) [7]string {
 	return out
 }
 
+func rangeDates(start string, numDays int) []string {
+	out := make([]string, numDays)
+	t, _ := time.Parse("2006-01-02", start)
+	for i := range numDays {
+		out[i] = t.AddDate(0, 0, i).Format("2006-01-02")
+	}
+	return out
+}
+
 func firstWeekStart() (string, error) {
 	var s sql.NullString
 	if err := tuiDB.QueryRow(`SELECT MIN(week_start) FROM weekly_goals`).Scan(&s); err != nil {
@@ -381,7 +390,18 @@ func loadTUIMetrics(weekStart string) ([]tuiMetric, error) {
 }
 
 func loadTUIProjects() ([]tuiProject, error) {
-	rows, err := tuiDB.Query(`SELECT id, name FROM projects ORDER BY id`)
+	rows, err := tuiDB.Query(`
+		SELECT p.id, p.name, ns.next_step
+		FROM projects p
+		LEFT JOIN (
+			SELECT project_id, next_step FROM blocks
+			WHERE id IN (
+				SELECT MAX(id) FROM blocks
+				WHERE next_step IS NOT NULL AND next_step != '' AND project_id IS NOT NULL
+				GROUP BY project_id
+			)
+		) ns ON ns.project_id = p.id
+		ORDER BY p.id`)
 	if err != nil {
 		return nil, err
 	}
@@ -390,8 +410,12 @@ func loadTUIProjects() ([]tuiProject, error) {
 	var out []tuiProject
 	for rows.Next() {
 		var p tuiProject
-		if err := rows.Scan(&p.id, &p.name); err != nil {
+		var nextStep sql.NullString
+		if err := rows.Scan(&p.id, &p.name, &nextStep); err != nil {
 			return nil, err
+		}
+		if nextStep.Valid {
+			p.nextStep = nextStep.String
 		}
 		out = append(out, p)
 	}

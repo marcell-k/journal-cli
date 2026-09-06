@@ -460,12 +460,26 @@ func (m tuiModel) viewStartProject() string {
 	b.WriteString(headerStyle.Render("=== New block: pick a project ==="))
 	b.WriteString("\n")
 
+	maxNameLen := 0
+	for _, p := range m.projects {
+		if len(p.name) > maxNameLen {
+			maxNameLen = len(p.name)
+		}
+	}
+
 	for i, p := range m.projects {
+		namePadded := fmt.Sprintf("%-*s", maxNameLen, p.name)
+		var hint string
+		if p.nextStep != "" {
+			hint = " " + dimStyle.Render("("+p.nextStep+")")
+		}
 		if i == m.projectCur {
-			b.WriteString(cursorStyle.Render("> " + p.name))
+			b.WriteString(cursorStyle.Render("> " + namePadded))
+			b.WriteString(hint)
 		} else {
 			b.WriteString("  ")
-			b.WriteString(p.name)
+			b.WriteString(namePadded)
+			b.WriteString(hint)
 		}
 		b.WriteString("\n")
 	}

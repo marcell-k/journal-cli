@@ -63,6 +63,7 @@ var (
 	focusHighStyle   = lipgloss.NewStyle().Padding(0, 1).Foreground(lipgloss.Color("#87a987"))
 	focusMidStyle    = lipgloss.NewStyle().Padding(0, 1).Foreground(lipgloss.Color("#e6c384"))
 	focusLowStyle    = lipgloss.NewStyle().Padding(0, 1).Foreground(lipgloss.Color("#e46876"))
+	nextStepStyle    = lipgloss.NewStyle().Italic(true).Foreground(lipgloss.Color("#6b6b64"))
 
 	deepTypeStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("#7fb4ca"))
 	shallowTypeStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#e6c384"))
@@ -171,8 +172,9 @@ type tuiMetric struct {
 }
 
 type tuiProject struct {
-	id   int
-	name string
+	id       int
+	name     string
+	nextStep string
 }
 
 // ---------- generic form ----------

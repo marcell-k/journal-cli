@@ -18,19 +18,39 @@ func selectProject(reader *bufio.Reader) (int, error) {
 	}
 	defer rows.Close()
 
-	ids := []int{}
-	fmt.Println("Project:")
+	nextSteps, err := lastNextSteps(conn)
+	if err != nil {
+		return 0, err
+	}
+
+	type projectRow struct {
+		id   int
+		name string
+	}
+	var projects []projectRow
+	maxNameLen := 0
 	for rows.Next() {
-		var id int
-		var name string
-		if err := rows.Scan(&id, &name); err != nil {
+		var p projectRow
+		if err := rows.Scan(&p.id, &p.name); err != nil {
 			return 0, err
 		}
-		ids = append(ids, id)
-		fmt.Printf("  %d) %s\n", id, name)
+		projects = append(projects, p)
+		if len(p.name) > maxNameLen {
+			maxNameLen = len(p.name)
+		}
 	}
 	if err := rows.Err(); err != nil {
 		return 0, err
+	}
+	ids := []int{}
+	fmt.Println("Project:")
+	for _, p := range projects {
+		ids = append(ids, p.id)
+		if ns, ok := nextSteps[p.id]; ok && ns != "" {
+			fmt.Printf("  %d) %-*s  %s\n", p.id, maxNameLen, p.name, dim("("+ns+")"))
+		} else {
+			fmt.Printf("  %d) %s\n", p.id, p.name)
+		}
 	}
 
 	for {
@@ -47,6 +67,36 @@ func selectProject(reader *bufio.Reader) (int, error) {
 		}
 		fmt.Println("Not a valid project id, try again.")
 	}
+}
+
+func lastNextSteps(conn *sql.DB) (map[int]string, error) {
+	rows, err := conn.Query(`
+		SELECT project_id, next_step FROM blocks
+		WHERE id IN (
+			SELECT MAX(id) FROM blocks
+			WHERE next_step IS NOT NULL AND next_step != '' AND project_id IS NOT NULL
+			GROUP BY project_id
+		)`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	out := map[int]string{}
+	for rows.Next() {
+		var pid int
+		var ns string
+		if err := rows.Scan(&pid, &ns); err != nil {
+			return nil, err
+		}
+		out[pid] = ns
+	}
+	return out, rows.Err()
+}
+
+func dim(s string) string {
+	// return "\x1b[2m" + s + "\x1b[0m"
+	return "\x1b[3;2m" + s + "\x1b[0m"
 }
 
 var projectCmd = &cobra.Command{
