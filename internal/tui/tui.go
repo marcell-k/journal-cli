@@ -26,6 +26,7 @@ const (
 )
 
 const weeksToShow = 3
+const trendDaysToShow = weeksToShow * 7
 
 const notesDir = "notes"
 

@@ -85,15 +85,20 @@ func rLine(r float64) string {
 }
 
 type tuiWeeklyTrend struct {
-	sleepHours [7]float64
-	sleepHas   [7]bool
-	focusAvg   [7]float64
-	focusHas   [7]bool
+	sleepHours []float64
+	sleepHas   []bool
+	focusAvg   []float64
+	focusHas   []bool
 }
 
-func loadWeeklyTrend(weekStart string) (tuiWeeklyTrend, error) {
-	var t tuiWeeklyTrend
-	dates := weekDates(weekStart)
+func loadWeeklyTrend(rangeStart string) (tuiWeeklyTrend, error) {
+	t := tuiWeeklyTrend{
+		sleepHours: make([]float64, trendDaysToShow),
+		sleepHas:   make([]bool, trendDaysToShow),
+		focusAvg:   make([]float64, trendDaysToShow),
+		focusHas:   make([]bool, trendDaysToShow),
+	}
+	dates := rangeDates(rangeStart, trendDaysToShow)
 	idx := make(map[string]int, 7)
 	for i, d := range dates {
 		idx[d] = i
@@ -101,7 +106,7 @@ func loadWeeklyTrend(weekStart string) (tuiWeeklyTrend, error) {
 
 	sleepRows, err := tuiDB.Query(
 		`SELECT date, sleep_hours, sleep_quality, feel, water_intake FROM daily_checkin WHERE date >= ? AND date <= ? ORDER BY date`,
-		dates[0], dates[6],
+		dates[0], dates[len(dates)-1],
 	)
 	if err != nil {
 		return t, err
@@ -163,8 +168,8 @@ func normalizeDate(raw string) string {
 var sparkChars = []rune{'▁', '▂', '▃', '▄', '▅', '▆', '▇', '█'}
 
 // sparkline renders one glyph per day; days with no data show '·'.
-func toPlotSeries(values [7]float64, has [7]bool) []float64 {
-	out := make([]float64, 7)
+func toPlotSeries(values []float64, has []bool) []float64 {
+	out := make([]float64, len(values))
 	for i, v := range values {
 		if has[i] {
 			out[i] = v
@@ -175,7 +180,7 @@ func toPlotSeries(values [7]float64, has [7]bool) []float64 {
 	return out
 }
 
-func weekDayAxis(graph string) string {
+func weekDayAxis(graph string, numDays int) string {
 	firstLine := graph
 	if first, _, ok := strings.Cut(graph, "\n"); ok {
 		firstLine = first
@@ -186,7 +191,11 @@ func weekDayAxis(graph string) string {
 	} else {
 		margin++ // include the axis glyph itself
 	}
-	days := []string{"M", "T", "W", "T", "F", "S", "S"}
+	dayLetters := []string{"M", "T", "W", "T", "F", "S", "S"}
+	days := make([]string, numDays)
+	for i := range days {
+		days[i] = dayLetters[i%7]
+	}
 	return strings.Repeat(" ", margin) + strings.Join(days, "   ")
 }
 
@@ -253,23 +262,23 @@ func (m tuiModel) viewMetrics() string {
 	sleepGraph := asciigraph.Plot(
 		toPlotSeries(m.weeklyTrend.sleepHours, m.weeklyTrend.sleepHas),
 		asciigraph.Height(4),
-		asciigraph.Width(20),
+		asciigraph.Width(trendDaysToShow*3),
 		asciigraph.Caption("Sleep (hrs)"),
 	)
 	b.WriteString(sleepGraph)
 	b.WriteString("\n")
-	b.WriteString(dimStyle.Render(weekDayAxis(sleepGraph)))
+	b.WriteString(dimStyle.Render(weekDayAxis(sleepGraph, trendDaysToShow)))
 	b.WriteString("\n\n")
 
 	focusGraph := asciigraph.Plot(
 		toPlotSeries(m.weeklyTrend.focusAvg, m.weeklyTrend.focusHas),
 		asciigraph.Height(4),
-		asciigraph.Width(20),
+		asciigraph.Width(trendDaysToShow*3),
 		asciigraph.Caption("Focus (avg)"),
 	)
 	b.WriteString(focusGraph)
 	b.WriteString("\n")
-	b.WriteString(dimStyle.Render(weekDayAxis(focusGraph)))
+	b.WriteString(dimStyle.Render(weekDayAxis(focusGraph, trendDaysToShow)))
 	b.WriteString("\n")
 
 	b.WriteString("\n")
@@ -583,7 +592,15 @@ func (m tuiModel) viewBlockDetail() string {
 	d := m.blockDetail
 
 	var b strings.Builder
-	b.WriteString(bannerStyle.Render(fmt.Sprintf("Block #%d (id=%d) — %s (%s)", d.blockNum, d.id, d.date, d.day)))
+	header := fmt.Sprintf("Block #%d (id=%d) — %s (%s)", d.blockNum, d.id, dateOnly(d.date), d.day)
+	if d.closedAt != nil {
+		closedTime := *d.closedAt
+		if ct, err := parseTimestamp(*d.closedAt); err == nil {
+			closedTime = ct.Format("15:04")
+		}
+		header += fmt.Sprintf(" — closed %s", closedTime)
+	}
+	b.WriteString(bannerStyle.Render(header))
 	b.WriteString("\n")
 
 	row := func(label, val string) {
