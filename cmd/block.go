@@ -20,6 +20,113 @@ var blockCmd = &cobra.Command{
 	Short: "View individual blocks (past or present)",
 }
 
+var blockReassignCmd = &cobra.Command{
+	Use:   "reassign <block_id> <project_id>",
+	Short: "Change which project a block is assigned to",
+	Args:  cobra.ExactArgs(2),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		blockID, err := strconv.Atoi(args[0])
+		if err != nil {
+			return fmt.Errorf("block id must be an integer, got %q", args[0])
+		}
+		projectID, err := strconv.Atoi(args[1])
+		if err != nil {
+			return fmt.Errorf("project id must be an integer, got %q", args[1])
+		}
+
+		var projectName string
+		err = conn.QueryRow(`SELECT name FROM projects WHERE id = ?`, projectID).Scan(&projectName)
+		if err == sql.ErrNoRows {
+			return fmt.Errorf("no project with id %d — run 'journal project list'", projectID)
+		}
+		if err != nil {
+			return err
+		}
+
+		res, err := conn.Exec(`UPDATE blocks SET project_id = ? WHERE id = ?`, projectID, blockID)
+		if err != nil {
+			return err
+		}
+		rows, _ := res.RowsAffected()
+		if rows == 0 {
+			return fmt.Errorf("no block with id %d", blockID)
+		}
+
+		fmt.Printf("Block id=%d reassigned to project %q (id=%d)\n", blockID, projectName, projectID)
+		return nil
+	},
+}
+
+var blockForCmd = &cobra.Command{
+	Use:   "for <project name or id>",
+	Short: "List all blocks for a project, by name or id",
+	Args:  cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		arg := args[0]
+
+		var projectID int
+		var projectName string
+		var err error
+		if id, convErr := strconv.Atoi(arg); convErr == nil {
+			err = conn.QueryRow(`SELECT id, name FROM projects WHERE id = ?`, id).Scan(&projectID, &projectName)
+		} else {
+			err = conn.QueryRow(`SELECT id, name FROM projects WHERE name = ?`, arg).Scan(&projectID, &projectName)
+		}
+		if err == sql.ErrNoRows {
+			return fmt.Errorf("no project matching %q", arg)
+		}
+		if err != nil {
+			return err
+		}
+
+		rows, err := conn.Query(`
+			SELECT id, date, block_num, outcome, focus_quality, created_at, closed_at
+			FROM blocks WHERE project_id = ?
+			ORDER BY date, block_num`, projectID)
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+
+		n := 0
+		for rows.Next() {
+			var id, blockNum int
+			var date, outcome string
+			var focus sql.NullFloat64
+			var createdAt string
+			var closedAt sql.NullString
+			if err := rows.Scan(&id, &date, &blockNum, &outcome, &focus, &createdAt, &closedAt); err != nil {
+				return err
+			}
+			status := "open"
+			if closedAt.Valid {
+				status = "closed"
+			}
+			focusStr := "-"
+			if focus.Valid {
+				focusStr = strconv.FormatFloat(focus.Float64, 'f', 1, 64)
+			}
+			lengthStr := "-"
+			if closedAt.Valid {
+				if ct, err1 := parseTimestamp(createdAt); err1 == nil {
+					if ct2, err2 := parseTimestamp(closedAt.String); err2 == nil {
+						lengthStr = formatDuration(ct2.Sub(ct))
+					}
+				}
+			}
+			fmt.Printf("id=%-4d %s #%-2d [%-6s] len:%-6s focus:%-2s %s\n", id, date, blockNum, status, lengthStr, focusStr, outcome)
+			n++
+		}
+		if err := rows.Err(); err != nil {
+			return err
+		}
+		if n == 0 {
+			fmt.Printf("No blocks found for project %q.\n", projectName)
+		}
+		return nil
+	},
+}
+
 var blockListCmd = &cobra.Command{
 	Use:   "list",
 	Short: "List blocks, optionally filtered by date range or project",
@@ -195,7 +302,7 @@ func init() {
 	blockListCmd.Flags().StringVar(&blockTo, "to", "", "only show blocks on/before this date (YYYY-MM-DD)")
 	blockListCmd.Flags().StringVar(&blockProject, "project", "", "only show blocks for this project name")
 
-	blockCmd.AddCommand(blockListCmd, blockShowCmd)
+	blockCmd.AddCommand(blockListCmd, blockShowCmd, blockReassignCmd, blockForCmd)
 	rootCmd.AddCommand(blockCmd)
 }
 
